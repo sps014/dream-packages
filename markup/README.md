@@ -91,7 +91,38 @@ HTML accepts fragments, unquoted/boolean attributes, void elements, optional end
 common paragraph/list/table/option cases, and malformed input recovery. It is a scraping
 tree, not a conforming HTML5 browser DOM: it does not synthesize html/body/tbody wrappers,
 implement the adoption-agency/foster-parenting algorithms, or switch to SVG/MathML rules.
-There is no CSS-selector engine; use element and attribute queries.
+`MarkupSelector.parse` supports the compound selectors needed by YoutubeExplode:
+tag names and `*`, `#id`, `.class`, `[attribute]`, `[attribute=value]`, and
+`*|local_name` for matching XML elements regardless of namespace prefix. Selectors
+can combine these forms, for example `meta[property="og:url"]` or `*|p[t][d]`.
+Unsupported combinators, groups, pseudo-classes, and CSS escapes return an error;
+this is not a complete CSS-selector engine. HTML names ignore case and attribute
+values match exactly. XML names and values remain case-sensitive.
+
+Parse a selector once, then pass it to `document.query(selector)` or
+`node.query(selector)`. Both return source-ordered arrays. Document queries include
+root elements; node queries exclude the receiver. For example, after parsing a page:
+
+```dream
+import system;
+import markup;
+
+fun main(): void {
+    let page = MarkupDocument.parse_html("<meta property='og:title' content='A &amp; B'>").unwrap();
+    let parsed = MarkupSelector.parse("meta[property='og:title']");
+    if parsed.is_err() {
+        System.println(parsed.unwrap_err().message);
+        return;
+    }
+    let matches = page.query(parsed.unwrap());
+    if matches.length > 0 {
+        System.println(matches[0].attribute("content").unwrap_or(""));
+    }
+}
+```
+
+This prints `A & B`. Script text follows the HTML escaped/double-escaped states,
+and `/>` does not close non-void HTML elements. XML empty-element syntax is preserved.
 
 ## Limits and errors
 
@@ -113,6 +144,29 @@ From the repository root, run `dreamer test -p markup_tests` and
 complete named-reference table, namespace scope, CDATA, raw HTML text, malformed
 inputs, and resource limits. Python is only used by development scripts to regenerate
 reference fixtures and verify standard data.
+
+## YoutubeExplode extraction coverage
+
+Reviewed against core upstream commit `c721f98d1d3272fa7f100f30ed04bd8e20efff0e`:
+
+| Upstream extraction | Dream operation |
+| --- | --- |
+| Channel Open Graph URL/title/image | `meta[property="..."]` selectors and `attribute("content")` |
+| Watch-page availability and upload dates | `#player` in a subtree and `meta[itemprop="..."]` selectors |
+| Inline player configuration/response | `elements("script")` and raw `text_content()` |
+| DASH representations, URLs, and audio configuration | `*|Representation`, `*|BaseURL`, and `*|AudioChannelConfiguration` selectors |
+| Caption/part text and timing | `*|p`, `*|s`, child arrays, `text_content()`, and attributes |
+
+`*|local_name` supports namespace-insensitive extraction without stripping XML
+namespace information. Use direct child arrays when an extraction requires direct
+children rather than descendants. Keep original page text separately for regex
+extraction; parsing normalizes newlines.
+
+The script handling follows the
+[HTML parsing specification](https://html.spec.whatwg.org/multipage/parsing.html#script-data-state).
+Tests use synthetic watch/channel, DASH, and caption fixtures, including prefixed
+namespaces and escaped script text. They validate these parsing primitives;
+complete YoutubeExplode parity still requires the port's extraction and HTTP tests.
 
 ## License
 

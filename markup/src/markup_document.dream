@@ -48,6 +48,12 @@ public class MarkupDocument {
         return Option.None;
     }
 
+    /// Returns source-ordered elements matching a parsed selector, including root elements.
+    /// Parse selectors with MarkupSelector.parse; unsupported syntax returns an error there.
+    public fun query(selector: MarkupSelector): MarkupNode[] {
+        return this.container.query(selector);
+    }
+
     /// Finds all elements by qualified name, or all elements when name is empty.
     public fun elements(name: string = ""): MarkupNode[] {
         return this.container.descendants(name);

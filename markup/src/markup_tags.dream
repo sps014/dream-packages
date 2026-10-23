@@ -220,7 +220,7 @@ internal static class MarkupTags {
             return;
         }
         p.append(node);
-        if !self_closing && !(p.html && MarkupTags.void_name(tag)) {
+        if (p.html && !MarkupTags.void_name(tag)) || (!p.html && !self_closing) {
             p.stack.push(node);
         }
     }
@@ -236,7 +236,18 @@ internal static class MarkupTags {
             p.fail("invalid closing tag");
             return;
         }
-        while p.position < p.source.length && !p.at(">") {
+        let quote = (char)0;
+        while p.position < p.source.length {
+            let c = p.source[p.position];
+            if p.html && quote != (char)0 {
+                if c == quote {
+                    quote = (char)0;
+                }
+            } else if p.html && (c == (char)39 || c == '"') {
+                quote = c;
+            } else if c == '>' {
+                break;
+            }
             p.position = p.position + 1;
         }
         if p.position == p.source.length {

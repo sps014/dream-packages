@@ -1,0 +1,10 @@
+[package]
+name = "semver_tests"
+version = "0.1.0"
+type = "test"
+
+[dependencies]
+semver = { path = "../../semver" }
+
+[test]
+targets = ["native", "node"]

@@ -1,0 +1,188 @@
+module markup;
+import system;
+import system.collections;
+
+/// A parsed, reusable compound selector for HTML metadata and namespace-aware XML queries.
+/// Supports tag/*, #id, .class, [attribute], [attribute=value], and *|local names.
+/// Combinators, groups, pseudo-classes, and CSS escapes are rejected.
+public class MarkupSelector {
+    source: string;
+    position: int;
+    tag: string;
+    local: bool;
+    names: List<string>;
+    values: List<Option<string>>;
+    classes: List<string>;
+
+    constructor(source: string) {
+        this.source = source;
+        this.position = 0;
+        this.tag = "";
+        this.local = false;
+        this.names = List<string>();
+        this.values = List<Option<string>>();
+        this.classes = List<string>();
+    }
+
+    static fun identifier(c: char): bool {
+        return (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    }
+
+    fun name(): string {
+        let start = this.position;
+        while this.position < this.source.length
+            && MarkupSelector.identifier(this.source[this.position]) {
+            this.position = this.position + 1;
+        }
+        return this.source.substring(start, this.position);
+    }
+
+    fun space(): void {
+        while this.position < this.source.length && MarkupParser.space(this.source[this.position]) {
+            this.position = this.position + 1;
+        }
+    }
+
+    /// Parses one compound selector. Errors include a zero-based UTF-16 position in trimmed source.
+    /// Attribute values are exact and case-sensitive. Tag/attribute names ignore case for HTML.
+    public static fun parse(source: string): Result<MarkupSelector, MarkupError> {
+        let s = MarkupSelector(source.trim());
+        if s.source.starts_with("*|") {
+            s.local = true;
+            s.position = 2;
+        }
+        if s.position < s.source.length && s.source[s.position] == '*' {
+            s.tag = "*";
+            s.position = s.position + 1;
+        } else {
+            s.tag = s.name();
+        }
+        if s.local && s.tag.is_empty() {
+            return Result.Err(MarkupError(s.position, "expected local name after *|"));
+        }
+        while s.position < s.source.length {
+            let c = s.source[s.position];
+            s.position = s.position + 1;
+            if c == '#' || c == '.' {
+                let name = s.name();
+                if name.is_empty() {
+                    return Result.Err(MarkupError(s.position, "expected identifier"));
+                }
+                if c == '#' {
+                    s.names.push("id");
+                    s.values.push(Option.Some(name));
+                } else {
+                    s.classes.push(name);
+                }
+            } else if c == '[' {
+                s.space();
+                let name = s.name();
+                if name.is_empty() {
+                    return Result.Err(MarkupError(s.position, "expected attribute name"));
+                }
+                s.space();
+                let value: Option<string> = Option.None;
+                if s.position < s.source.length && s.source[s.position] == '=' {
+                    s.position = s.position + 1;
+                    s.space();
+                    if s.position >= s.source.length {
+                        return Result.Err(MarkupError(s.position, "expected attribute value"));
+                    }
+                    let quote = s.source[s.position];
+                    let text = "";
+                    if quote == (char)39 || quote == '"' {
+                        s.position = s.position + 1;
+                        let start = s.position;
+                        while s.position < s.source.length && s.source[s.position] != quote {
+                            if s.source[s.position] == (char)92 {
+                                return Result.Err(
+                                    MarkupError(s.position, "CSS escapes are not supported")
+                                );
+                            }
+                            s.position = s.position + 1;
+                        }
+                        if s.position == s.source.length {
+                            return Result.Err(
+                                MarkupError(s.position, "unterminated selector value")
+                            );
+                        }
+                        text = s.source.substring(start, s.position);
+                        s.position = s.position + 1;
+                    } else {
+                        text = s.name();
+                        if text.is_empty() {
+                            return Result.Err(MarkupError(s.position, "expected attribute value"));
+                        }
+                    }
+                    value = Option.Some(text);
+                    s.space();
+                }
+                if s.position >= s.source.length || s.source[s.position] != ']' {
+                    return Result.Err(MarkupError(s.position, "expected ]"));
+                }
+                s.position = s.position + 1;
+                s.names.push(name);
+                s.values.push(value);
+            } else {
+                return Result.Err(MarkupError(s.position - 1, "unsupported selector syntax"));
+            }
+        }
+        if s.tag.is_empty() && s.names.is_empty() && s.classes.is_empty() {
+            return Result.Err(MarkupError(0, "empty selector"));
+        }
+        return Result.Ok(s);
+    }
+
+    internal fun query(root: MarkupNode): MarkupNode[] {
+        let result = List<MarkupNode>();
+        for (let node in root.descendants()) {
+            if this.matches(node) {
+                result.push(node);
+            }
+        }
+        return result.take_array();
+    }
+
+    internal fun matches(node: MarkupNode): bool {
+        let name = node.name;
+        if this.local {
+            name = node.local_name;
+        }
+        let tag = this.tag;
+        if node.html {
+            tag = tag.to_lower();
+        }
+        if tag != "" && tag != "*" && tag != name {
+            return false;
+        }
+        let i = 0;
+        while i < this.names.length {
+            let value = node.attribute(this.names[i]);
+            if value.is_none()
+                || (this.values[i].is_some() && value.unwrap() != this.values[i].unwrap()) {
+                return false;
+            }
+            i = i + 1;
+        }
+        if !this.classes.is_empty() {
+            let classes = node.attribute("class").unwrap_or("");
+            classes = classes.replace("\t", " ")
+                .replace("\n", " ")
+                .replace("\r", " ")
+                .replace(((char)12).as_string(), " ");
+            for (let expected in this.classes) {
+                let found = false;
+                for (let actual in classes.split(' ')) {
+                    if actual == expected {
+                        found = true;
+                    }
+                }
+                if !found {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+}

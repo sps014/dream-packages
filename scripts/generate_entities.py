@@ -28,7 +28,7 @@ def artifacts():
             + ";\n    }\n}\n")
     source = "<r>" + "".join("&" + name + "|" for name, _ in entries) + "</r>"
     expected = "".join(value + "|" for _, value in entries)
-    test = ("import system.testing;\nimport markup;\n\n@test\n"
+    test = ("module markup_tests;\nimport system.testing;\nimport markup;\n\n@test\n"
             "fun complete_html_named_reference_table(): void {\n    let source = "
             + expressions(source) + ";\n    let expected = " + expressions(expected)
             + ";\n    Assert.eq(MarkupDocument.parse_html(source).unwrap().root.unwrap().text_content(), expected);\n}\n")

@@ -119,6 +119,12 @@ public class MarkupNode {
         return out.to_string();
     }
 
+    /// Returns source-ordered descendants matching a parsed selector; excludes the receiver.
+    /// Parse once with MarkupSelector.parse and reuse the selector across documents or subtrees.
+    public fun query(selector: MarkupSelector): MarkupNode[] {
+        return selector.query(this);
+    }
+
     /// Finds descendant elements in source order, excluding this node. Empty name matches all.
     public fun descendants(name: string = ""): MarkupNode[] {
         let key = name;

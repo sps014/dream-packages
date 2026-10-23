@@ -1,0 +1,88 @@
+module semver_tests;
+import system;
+import system.testing;
+import semver;
+
+@test
+fun parses_and_compares_imported_versions(): void {
+    let version = SemVer.parse("1.2.3-beta.1+build").unwrap();
+    Assert.eq(version.to_string(), "1.2.3-beta.1+build");
+    Assert.eq(version.major, 1);
+    Assert.eq(version.minor, 2);
+    Assert.eq(version.patch, 3);
+    Assert.is_true(SemVer.parse("01.2.3").is_err());
+    Assert.is_true(SemVer.parse("1.2").is_err());
+    Assert.eq(SemVer.compare(SemVer.parse("1.2.0").unwrap(), SemVer.parse("1.10.0").unwrap()), -1);
+    Assert.is_true(version.lt(SemVer.parse("1.2.3").unwrap()));
+    Assert.is_true(SemVer.parse("1.2.3+one").unwrap().eq(SemVer.parse("1.2.3+two").unwrap()));
+}
+
+@test
+fun matches_supported_requirements(): void {
+    let version = SemVer.parse("1.5.2").unwrap();
+    Assert.is_true(SemVer.satisfies(version, "^1.2"));
+    Assert.is_true(SemVer.satisfies(version, "~1.5.0"));
+    Assert.is_true(SemVer.satisfies(version, ">=1.0.0, <2.0.0"));
+    Assert.is_false(SemVer.satisfies(version, "^2.0"));
+    Assert.is_false(SemVer.satisfies(version, "~1.4"));
+    Assert.is_false(SemVer.satisfies(version, "1.5.1"));
+}
+
+@test
+fun prerelease_identifier_precedence(): void {
+    let ordered = [
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0"
+    ];
+    let i = 0;
+    while i < ordered.length {
+        let j = 0;
+        while j < ordered.length {
+            let order = SemVer.compare(
+                SemVer.parse(ordered[i]).unwrap(),
+                SemVer.parse(ordered[j]).unwrap()
+            );
+            Assert.eq(order < 0, i < j);
+            Assert.eq(order == 0, i == j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Assert.is_true(
+        SemVer.parse("1.0.0-999999999999999999999999999999")
+            .unwrap()
+            .lt(SemVer.parse("1.0.0-z").unwrap())
+    );
+    Assert.is_true(
+        SemVer.parse("1.0.0-99999999999999999999")
+            .unwrap()
+            .lt(SemVer.parse("1.0.0-100000000000000000000").unwrap())
+    );
+}
+
+@test
+fun rejects_invalid_identifiers_in_versions_and_requirements(): void {
+    for (let value in [
+        "1.2.3-01",
+        "1.2.3-a..b",
+        "1.2.3-.a",
+        "1.2.3-a.",
+        "1.2.3-a_b",
+        "1.2.3+",
+        "1.2.3+a..b",
+        "1.2.3+a+b",
+        "1.2.3-",
+        "1.2.3-β"
+    ]) {
+        Assert.is_true(SemVer.parse(value).is_err());
+        Assert.is_false(SemVer.satisfies(SemVer.parse("1.2.3").unwrap(), "^" + value));
+    }
+    Assert.is_true(SemVer.parse("1.2.3-0A-1+001.a-z").is_ok());
+    Assert.is_false(SemVer.satisfies(SemVer.parse("1.2.3").unwrap(), "~1.2-01"));
+}

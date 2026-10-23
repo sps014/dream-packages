@@ -1,0 +1,55 @@
+module markup;
+
+internal static class MarkupScript {
+    static fun boundary(p: MarkupParser, at: int): bool {
+        return at < p.source.length
+            && (p.source[at] == '>' || p.source[at] == '/' || MarkupParser.space(p.source[at]));
+    }
+
+    internal static fun end(p: MarkupParser, start: int): int {
+        let mode = 0;
+        let i = start;
+        while i < p.source.length {
+            // HTML's double-escaped script text can contain a literal </script>.
+            if mode
+                != 0
+                && i >= start
+                + 2 && p.source[i] == '>' && p.source[i - 1] == '-' && p.source[i - 2] == '-' {
+                mode = 0;
+            } else if mode == 0 && p.at_index("<!--", i, false) {
+                mode = 1;
+                i = i + 3;
+            } else if mode == 1 && p.at_index("<script", i, true) && MarkupScript.boundary(
+                p,
+                i + 7
+            ) {
+                mode = 2;
+                i = i + 6;
+            } else if p.at_index("</script", i, true) && MarkupScript.boundary(p, i + 8) {
+                if mode == 2 {
+                    mode = 1;
+                    i = i + 7;
+                } else {
+                    let at = i + 8;
+                    let quote = (char)0;
+                    while at < p.source.length {
+                        let c = p.source[at];
+                        if quote != (char)0 {
+                            if c == quote {
+                                quote = (char)0;
+                            }
+                        } else if c == (char)39 || c == '"' {
+                            quote = c;
+                        } else if c == '>' {
+                            return i;
+                        }
+                        at = at + 1;
+                    }
+                    return -1;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+}

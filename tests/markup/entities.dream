@@ -1,3 +1,4 @@
+module markup_tests;
 import system.testing;
 import markup;
 

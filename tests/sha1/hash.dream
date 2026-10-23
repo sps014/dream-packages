@@ -1,3 +1,4 @@
+module sha1_tests;
 import system;
 import system.testing;
 import sha1;

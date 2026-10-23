@@ -1,3 +1,4 @@
+module semver;
 import system;
 import system.text;
 
@@ -6,8 +7,10 @@ public class SemVer {
     public major: int;
     public minor: int;
     public patch: int;
+
     /// Dot-separated prerelease identifiers, or `""` when absent.
     public prerelease: string;
+
     /// Build metadata (ignored for precedence), or `""` when absent.
     public build: string;
 
@@ -37,7 +40,7 @@ public class SemVer {
                     return Result.Err("empty build metadata");
                 }
             },
-            None => { },
+            None => {},
         }
 
         let prerelease = "";
@@ -51,7 +54,7 @@ public class SemVer {
                     return Result.Err("empty prerelease");
                 }
             },
-            None => { },
+            None => {},
         }
 
         let parts = core.split('.');
@@ -60,24 +63,50 @@ public class SemVer {
         }
         let major_r = SemVer._parse_num(parts[0], "major");
         if (major_r.is_err()) {
-            return Result.Err(switch (major_r) { Ok(v) => "", Err(e) => e, });
+            return Result.Err(
+                switch (major_r) {
+                    Ok(v) => "",
+                    Err(e) => e,
+                }
+            );
         }
         let minor_r = SemVer._parse_num(parts[1], "minor");
         if (minor_r.is_err()) {
-            return Result.Err(switch (minor_r) { Ok(v) => "", Err(e) => e, });
+            return Result.Err(
+                switch (minor_r) {
+                    Ok(v) => "",
+                    Err(e) => e,
+                }
+            );
         }
         let patch_r = SemVer._parse_num(parts[2], "patch");
         if (patch_r.is_err()) {
-            return Result.Err(switch (patch_r) { Ok(v) => "", Err(e) => e, });
+            return Result.Err(
+                switch (patch_r) {
+                    Ok(v) => "",
+                    Err(e) => e,
+                }
+            );
         }
-        let major = switch (major_r) { Ok(v) => v, Err(e) => 0, };
-        let minor = switch (minor_r) { Ok(v) => v, Err(e) => 0, };
-        let patch = switch (patch_r) { Ok(v) => v, Err(e) => 0, };
+        if !SemVer._identifiers(prerelease, true) || !SemVer._identifiers(build, false) {
+            return Result.Err("invalid prerelease or build identifier");
+        }
+        let major = switch (major_r) {
+            Ok(v) => v,
+            Err(e) => 0,
+        };
+        let minor = switch (minor_r) {
+            Ok(v) => v,
+            Err(e) => 0,
+        };
+        let patch = switch (patch_r) {
+            Ok(v) => v,
+            Err(e) => 0,
+        };
         return Result.Ok(SemVer(major, minor, patch, prerelease, build));
     }
 
-    @override
-    public fun to_string(): string {
+    public override fun to_string(): string {
         let s = this.major.to_string() + "." + this.minor.to_string() + "." + this.patch.to_string();
         if (!this.prerelease.is_empty()) {
             s = s + "-" + this.prerelease;
@@ -90,12 +119,24 @@ public class SemVer {
 
     /// Orders by precedence: −1 if `a < b`, 0 if equal, 1 if `a > b`. Build metadata is ignored.
     public static fun compare(a: SemVer, b: SemVer): int {
-        if (a.major < b.major) { return 0 - 1; }
-        if (a.major > b.major) { return 1; }
-        if (a.minor < b.minor) { return 0 - 1; }
-        if (a.minor > b.minor) { return 1; }
-        if (a.patch < b.patch) { return 0 - 1; }
-        if (a.patch > b.patch) { return 1; }
+        if (a.major < b.major) {
+            return 0 - 1;
+        }
+        if (a.major > b.major) {
+            return 1;
+        }
+        if (a.minor < b.minor) {
+            return 0 - 1;
+        }
+        if (a.minor > b.minor) {
+            return 1;
+        }
+        if (a.patch < b.patch) {
+            return 0 - 1;
+        }
+        if (a.patch > b.patch) {
+            return 1;
+        }
         let a_pre = a.prerelease.is_empty();
         let b_pre = b.prerelease.is_empty();
         if (a_pre && b_pre) {
@@ -108,7 +149,39 @@ public class SemVer {
         if (b_pre) {
             return 0 - 1;
         }
-        return a.prerelease.compare(b.prerelease);
+        let left = a.prerelease.split('.');
+        let right = b.prerelease.split('.');
+        let i = 0;
+        while i < left.length && i < right.length {
+            let l = left[i];
+            let r = right[i];
+            let ln = SemVer._numeric(l);
+            let rn = SemVer._numeric(r);
+            if ln && !rn {
+                return -1;
+            }
+            if !ln && rn {
+                return 1;
+            }
+            if ln && rn && l.length != r.length {
+                if l.length < r.length {
+                    return -1;
+                }
+                return 1;
+            }
+            let order = l.compare(r);
+            if order != 0 {
+                return order;
+            }
+            i = i + 1;
+        }
+        if left.length < right.length {
+            return -1;
+        }
+        if left.length > right.length {
+            return 1;
+        }
+        return 0;
     }
 
     public fun eq(other: SemVer): bool {
@@ -152,12 +225,12 @@ public class SemVer {
         if (text.is_empty()) {
             return Result.Err("empty " + label);
         }
-        if ((text.length > 1) && (text.char_at(0) == '0')) {
+        if ((text.length > 1) && (text[0] == '0')) {
             return Result.Err(label + " must not have leading zeros");
         }
         let i = 0;
         while (i < text.length) {
-            let c = text.char_at(i);
+            let c = text[i];
             if ((c < '0') || (c > '9')) {
                 return Result.Err("invalid " + label + " digit");
             }
@@ -170,61 +243,67 @@ public class SemVer {
         };
     }
 
+    static fun _numeric(value: string): bool {
+        if value.is_empty() {
+            return false;
+        }
+        for (let c in value) {
+            if c < '0' || c > '9' {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static fun _identifiers(value: string, prerelease: bool): bool {
+        if value.is_empty() {
+            return true;
+        }
+        for (let identifier in value.split('.')) {
+            if identifier.is_empty() {
+                return false;
+            }
+            for (let c in identifier) {
+                if !(
+                    (c >= '0' && c <= '9')
+                        || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-'
+                ) {
+                    return false;
+                }
+            }
+            if prerelease
+                && identifier.length > 1 && identifier[0] == '0' && SemVer._numeric(identifier) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static fun _parse_partial(text: string): Result<SemVer, string> {
-        let t = text.trim();
-        if (t.is_empty()) {
-            return Result.Err("empty version in requirement");
+        let value = text.trim();
+        if value.starts_with("v") {
+            value = value.substring(1, value.length);
         }
-        // Strip leading `v` sometimes used in tags.
-        if (t.starts_with("v") && (t.length > 1)) {
-            t = t.substring(1, t.length);
+        let end = value.length;
+        let i = 0;
+        while i < value.length {
+            if value[i] == '-' || value[i] == '+' {
+                end = i;
+                break;
+            }
+            i = i + 1;
         }
-        let build = "";
-        let rest = t;
-        let plus = t.index_of('+');
-        switch (plus) {
-            Some(idx) => {
-                build = t.substring(idx + 1, t.length);
-                rest = t.substring(0, idx);
-            },
-            None => { },
-        }
-        let prerelease = "";
-        let core = rest;
-        let dash = rest.index_of('-');
-        switch (dash) {
-            Some(idx) => {
-                prerelease = rest.substring(idx + 1, rest.length);
-                core = rest.substring(0, idx);
-            },
-            None => { },
-        }
+        let core = value.substring(0, end);
         let parts = core.split('.');
-        if (parts.length < 1 || parts.length > 3) {
+        if parts.length < 1 || parts.length > 3 {
             return Result.Err("invalid version in requirement");
         }
-        let major_r = SemVer._parse_num(parts[0], "major");
-        if (major_r.is_err()) {
-            return Result.Err(switch (major_r) { Ok(v) => "", Err(e) => e, });
+        i = parts.length;
+        while i < 3 {
+            core = core + ".0";
+            i = i + 1;
         }
-        let major = switch (major_r) { Ok(v) => v, Err(e) => 0, };
-        let minor = 0;
-        let patch = 0;
-        if (parts.length >= 2) {
-            let minor_r = SemVer._parse_num(parts[1], "minor");
-            if (minor_r.is_err()) {
-                return Result.Err(switch (minor_r) { Ok(v) => "", Err(e) => e, });
-            }
-            minor = switch (minor_r) { Ok(v) => v, Err(e) => 0, };
-        }
-        if (parts.length >= 3) {
-            let patch_r = SemVer._parse_num(parts[2], "patch");
-            if (patch_r.is_err()) {
-                return Result.Err(switch (patch_r) { Ok(v) => "", Err(e) => e, });
-            }
-            patch = switch (patch_r) { Ok(v) => v, Err(e) => 0, };
-        }
-        return Result.Ok(SemVer(major, minor, patch, prerelease, build));
+        return SemVer.parse(core + value.substring(end, value.length));
     }
 
     static fun _satisfies_one(version: SemVer, clause: string): bool {
@@ -233,7 +312,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             if (version.lt(base)) {
                 return false;
             }
@@ -251,7 +333,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             if (version.lt(base)) {
                 return false;
             }
@@ -262,7 +347,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             return version.gte(base);
         }
         if (clause.starts_with("<=")) {
@@ -270,7 +358,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             return version.lte(base);
         }
         if (clause.starts_with(">") && !clause.starts_with(">=")) {
@@ -278,7 +369,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             return version.gt(base);
         }
         if (clause.starts_with("<") && !clause.starts_with("<=")) {
@@ -286,7 +380,10 @@ public class SemVer {
             if (base_r.is_err()) {
                 return false;
             }
-            let base = switch (base_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (base_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             return version.lt(base);
         }
         let exact_r = SemVer.parse(clause);
@@ -296,10 +393,16 @@ public class SemVer {
             if (partial_r.is_err()) {
                 return false;
             }
-            let base = switch (partial_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+            let base = switch (partial_r) {
+                Ok(v) => v,
+                Err(e) => SemVer(0, 0, 0, "", ""),
+            };
             return version.eq(base);
         }
-        let exact = switch (exact_r) { Ok(v) => v, Err(e) => SemVer(0, 0, 0, "", ""), };
+        let exact = switch (exact_r) {
+            Ok(v) => v,
+            Err(e) => SemVer(0, 0, 0, "", ""),
+        };
         return version.eq(exact);
     }
 }

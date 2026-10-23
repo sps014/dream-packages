@@ -1,0 +1,137 @@
+module markup_tests;
+import system;
+import system.testing;
+import markup;
+
+@test
+fun watch_and_channel_page_queries(): void {
+    let page = MarkupDocument.parse_html(
+        "<!doctype html><HTML><HEAD><META PROPERTY='og:url' CONTENT='https://www.youtube.com/channel/UC123'><meta property='og:title' content='A &amp; B'><meta property='og:image' content='https://example.test/a?x=1&amp;y=2'><meta itemprop='uploadDate' content='2026-01-01'><script/>var ytInitialPlayerResponse = {\"title\":\"A &amp; B\"};</script></HEAD><BODY><div id=player class='video player'></div><div id=player-other></div></BODY></HTML>"
+    ).unwrap();
+    let url = MarkupSelector.parse("meta[property=\"og:url\"]").unwrap();
+    Assert.eq(page.query(url).length, 1);
+    Assert.eq(
+        page.query(url)[0].attribute("content").unwrap(),
+        "https://www.youtube.com/channel/UC123"
+    );
+    Assert.eq(
+        page.query(MarkupSelector.parse("META[property='og:title']").unwrap())[0]
+            .attribute("content")
+            .unwrap(),
+        "A & B"
+    );
+    Assert.eq(
+        page.query(MarkupSelector.parse("meta[property='og:image']").unwrap())[0]
+            .attribute("content")
+            .unwrap(),
+        "https://example.test/a?x=1&y=2"
+    );
+    Assert.eq(
+        page.query(MarkupSelector.parse("meta[itemprop=uploadDate]").unwrap())[0]
+            .attribute("content")
+            .unwrap(),
+        "2026-01-01"
+    );
+    let body = page.elements("body")[0];
+    Assert.eq(body.query(MarkupSelector.parse("#player.video.player").unwrap()).length, 1);
+    Assert.eq(body.query(MarkupSelector.parse("[id]").unwrap()).length, 2);
+    Assert.eq(
+        page.elements("script")[0].text_content(),
+        "var ytInitialPlayerResponse = {\"title\":\"A &amp; B\"};"
+    );
+    Assert.eq(page.query(MarkupSelector.parse("meta[property='OG:TITLE']").unwrap()).length, 0);
+    let other = MarkupDocument.parse_html("<meta property=og:url content=second>").unwrap();
+    Assert.eq(other.query(url)[0].attribute("content").unwrap(), "second");
+    for (let invalid in [
+        "",
+        "meta body",
+        "meta,script",
+        "div > script",
+        ":scope",
+        "[",
+        "#",
+        ".",
+        "meta[attr!=x]",
+        "[a='unterminated]",
+        "*|"
+    ]) {
+        Assert.is_true(MarkupSelector.parse(invalid).is_err());
+    }
+}
+
+@test
+fun script_escaped_text_and_end_tags(): void {
+    let page = MarkupDocument.parse_html(
+        "<script><!--<ScRiPt>literal</SCRIPT>still raw--></script><meta property=og:url content=ok>"
+    ).unwrap();
+    Assert.eq(page.elements("script").length, 1);
+    Assert.eq(
+        page.elements("script")[0].text_content(),
+        "<!--<ScRiPt>literal</SCRIPT>still raw-->"
+    );
+    Assert.eq(page.elements("meta").length, 1);
+    Assert.eq(
+        MarkupDocument.parse_html("<script><!--></script><meta>").unwrap().elements("meta").length,
+        1
+    );
+    Assert.eq(
+        MarkupDocument.parse_html("<script><!--<script>--></script><meta>")
+            .unwrap()
+            .elements("meta")
+            .length,
+        1
+    );
+    Assert.eq(
+        MarkupDocument.parse_html("<script>x</script").unwrap().elements("script")[0].text_content(),
+        "x</script"
+    );
+    Assert.eq(
+        MarkupDocument.parse_html("<script>x</script a='>'><meta>").unwrap().elements("meta").length,
+        1
+    );
+    Assert.eq(
+        MarkupDocument.parse_html("<script>x</script a='>'")
+            .unwrap()
+            .elements("script")[0]
+            .text_content(),
+        "x</script a='>'"
+    );
+    Assert.eq(
+        MarkupDocument.parse_html("<div/>text</div>").unwrap().root.unwrap().text_content(),
+        "text"
+    );
+    Assert.eq(
+        MarkupDocument.parse_xml("<r><child/>text</r>").unwrap().elements("child")[0].text_content(),
+        ""
+    );
+}
+
+@test
+fun prefixed_dash_and_caption_queries(): void {
+    let dash = MarkupDocument.parse_xml(
+        "<d:MPD xmlns:d='urn:mpeg:dash:schema:mpd:2011'><d:Period><d:Representation id='140' bandwidth='128000' codecs='mp4a.40.2'><d:BaseURL>https://example.test/media?a=1&amp;b=2</d:BaseURL><d:AudioChannelConfiguration value='2'/></d:Representation></d:Period></d:MPD>"
+    ).unwrap();
+    let representations = dash.query(MarkupSelector.parse("*|Representation[codecs]").unwrap());
+    Assert.eq(representations.length, 1);
+    Assert.eq(representations[0].attribute("id").unwrap(), "140");
+    Assert.eq(
+        representations[0].query(MarkupSelector.parse("*|BaseURL").unwrap())[0].text_content(),
+        "https://example.test/media?a=1&b=2"
+    );
+    Assert.eq(
+        representations[0]
+            .query(MarkupSelector.parse("*|AudioChannelConfiguration").unwrap())
+            .length,
+        1
+    );
+    Assert.eq(dash.query(MarkupSelector.parse("*|representation").unwrap()).length, 0);
+    let captions = MarkupDocument.parse_xml(
+        "<tt:timedtext xmlns:tt='urn:captions'><tt:body><tt:p t='1000' d='2500'><tt:s t='0'>Hello &amp;amp; </tt:s><tt:s ac='500'><![CDATA[<world>]]></tt:s></tt:p></tt:body></tt:timedtext>"
+    ).unwrap();
+    let caption = captions.query(MarkupSelector.parse("*|p[t][d]").unwrap())[0];
+    Assert.eq(caption.text_content(), "Hello &amp; <world>");
+    let parts = caption.query(MarkupSelector.parse("*|s").unwrap());
+    Assert.eq(parts.length, 2);
+    Assert.eq(parts[1].attribute("ac").unwrap(), "500");
+    Assert.eq(parts[1].text_content(), "<world>");
+}

@@ -10,3 +10,5 @@ import markup_parser;
 import markup_tags;
 import markup_text;
 import markup_xml;
+import markup_script;
+import markup_selector;

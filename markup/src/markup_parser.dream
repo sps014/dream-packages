@@ -268,7 +268,10 @@ internal class MarkupParser {
         let marker = "</" + name;
         let start = this.position;
         let end = this.find(marker, start, true);
-        while end >= 0 {
+        if name == "script" {
+            end = MarkupScript.end(this, start);
+        }
+        while name != "script" && end >= 0 {
             let after = end + marker.length;
             if after
                 == this.source.length
