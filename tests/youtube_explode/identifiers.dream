@@ -1,0 +1,79 @@
+module youtube_explode_tests;
+import system;
+import system.testing;
+import system.collections;
+import youtube_explode;
+
+@test
+fun upstream_identifier_forms(): void {
+    for (let input in [
+        "yIVRs6YSbOM",
+        "https://www.youtube.com/watch?v=yIVRs6YSbOM",
+        "https://youtu.be/yIVRs6YSbOM?x=1",
+        "https://youtu.be/watch?v=yIVRs6YSbOM",
+        "https://youtube.com/embed/yIVRs6YSbOM",
+        "https://youtube.com/shorts/yIVRs6YSbOM",
+        "https://youtube.com/live/yIVRs6YSbOM",
+        "https://youtube.com/watch?v=%79IVRs6YSbOM&list=PL123"
+    ]) {
+        Assert.eq(VideoId.parse(input).unwrap().value, "yIVRs6YSbOM");
+    }
+    Assert.eq(
+        ChannelId.parse("https://youtube.com/channel/UC3xnGqlcL3y-GXz5N3wiTJQ/videos")
+            .unwrap()
+            .value,
+        "UC3xnGqlcL3y-GXz5N3wiTJQ"
+    );
+    Assert.eq(ChannelHandle.parse("https://youtube.com/@Tyrrrz").unwrap().value, "Tyrrrz");
+    Assert.eq(
+        ChannelHandle.parse("https://youtube.com/@%CE%94%CE%BF%CE%BA%CE%B9%CE%BC%CE%AE")
+            .unwrap()
+            .value,
+        "Δοκιμή"
+    );
+    Assert.eq(ChannelHandle.parse("some.handle-1_2").unwrap().value, "some.handle-1_2");
+    Assert.eq(UserName.parse("https://youtube.com/user/TheTyrrr").unwrap().value, "TheTyrrr");
+    Assert.eq(ChannelSlug.parse("https://youtube.com/c/Tyrrrz").unwrap().value, "Tyrrrz");
+    for (let input in [
+        "PL123",
+        "https://youtube.com/playlist?list=PL123",
+        "https://youtube.com/watch?v=yIVRs6YSbOM&list=PL123",
+        "https://youtu.be/yIVRs6YSbOM/?list=PL123",
+        "https://youtube.com/embed/yIVRs6YSbOM/?list=PL123"
+    ]) {
+        Assert.eq(PlaylistId.parse(input).unwrap().value, "PL123");
+    }
+}
+
+@test
+fun rejects_invalid_identifiers(): void {
+    for (let input in ["", " ", "short", "invalid!xxx", "https://youtube.com/watch?v=short"]) {
+        Assert.is_true(VideoId.parse(input).is_err());
+    }
+    Assert.is_true(ChannelId.parse("UU3xnGqlcL3y-GXz5N3wiTJQ").is_err());
+    Assert.is_true(PlaylistId.parse("X").is_err());
+    Assert.is_true(UserName.parse("name-with-dash").is_err());
+    Assert.is_true(ChannelSlug.parse("name_with_underscore").is_err());
+}
+
+@test
+fun identifier_value_equality_and_hashing(): void {
+    let raw = VideoId.parse("yIVRs6YSbOM").unwrap();
+    let url = VideoId.parse("https://youtu.be/yIVRs6YSbOM").unwrap();
+    Assert.is_true(raw == url);
+    Assert.eq(raw.hash_code(), url.hash_code());
+    let values = Map<VideoId, int>();
+    values[raw] = 7;
+    Assert.eq(values[url], 7);
+    values[url] = 9;
+    Assert.eq(values.length, 1);
+    Assert.eq(values[raw], 9);
+    Assert.is_true(
+        ChannelHandle.parse("Tyrrrz").unwrap() != ChannelHandle.parse("tyrrrz").unwrap()
+    );
+    Assert.is_true(
+        PlaylistId.parse("PL123")
+            .unwrap() == PlaylistId.parse("https://youtube.com/playlist?list=PL123")
+            .unwrap()
+    );
+}

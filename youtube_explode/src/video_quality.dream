@@ -1,0 +1,407 @@
+module youtube_explode;
+import system;
+import system.text;
+
+/// A YouTube quality label, maximum display height, and frame rate.
+public class VideoQuality {
+    label_value: string;
+    height_value: int;
+    rate_value: int;
+
+    /// Creates quality metadata. max_height is in pixels and framerate is frames/second.
+    public constructor(label: string, max_height: int, framerate: int) {
+        this.label_value = label;
+        this.height_value = max_height;
+        this.rate_value = framerate;
+    }
+
+    /// Original YouTube label, including HDR/360-degree suffixes when present.
+    public get label(): string {
+        return this.label_value;
+    }
+
+    /// Maximum vertical resolution in pixels.
+    public get max_height(): int {
+        return this.height_value;
+    }
+
+    /// Frames per second.
+    public get framerate(): int {
+        return this.rate_value;
+    }
+
+    /// True for 1080p and higher.
+    public get is_high_definition(): bool {
+        return this.height_value >= 1080;
+    }
+
+    /// Parses labels such as 1080p, 720p60, 1080s, or 2160p60 HDR.
+    /// A label without an explicit rate uses fallback_framerate. Invalid labels return extraction.
+    public static fun parse(
+        label: string,
+        fallback_framerate: int = 24
+    ): Result<VideoQuality, YoutubeError> {
+        let match = Regex.compile("^(\\d+)\\D(\\d+)?").unwrap().match(label);
+        if match.length < 2 {
+            return Result.Err(YoutubeError("extraction", "invalid video quality label"));
+        }
+        let height = int.parse(match[1]);
+        let rate = fallback_framerate;
+        if match.length > 2 && match[2] != "" {
+            let parsed = int.parse(match[2]);
+            if parsed.is_err() {
+                return Result.Err(YoutubeError("extraction", "invalid quality frame rate"));
+            }
+            rate = parsed.unwrap();
+        }
+        if height.is_err() || height.unwrap() <= 0 || height.unwrap() > 1207959551 || rate <= 0 {
+            return Result.Err(
+                YoutubeError("extraction", "invalid quality dimensions or frame rate")
+            );
+        }
+        return Result.Ok(VideoQuality(label, height.unwrap(), rate));
+    }
+
+    internal static fun from_itag(itag: int, rate: int): Result<VideoQuality, YoutubeError> {
+        if rate <= 0 {
+            return Result.Err(YoutubeError("extraction", "invalid quality frame rate"));
+        }
+        let height = 0;
+        if itag == 5 {
+            height = 144;
+        }
+        if itag == 6 {
+            height = 240;
+        }
+        if itag == 13 {
+            height = 144;
+        }
+        if itag == 17 {
+            height = 144;
+        }
+        if itag == 18 {
+            height = 360;
+        }
+        if itag == 22 {
+            height = 720;
+        }
+        if itag == 34 {
+            height = 360;
+        }
+        if itag == 35 {
+            height = 480;
+        }
+        if itag == 36 {
+            height = 240;
+        }
+        if itag == 37 {
+            height = 1080;
+        }
+        if itag == 38 {
+            height = 3072;
+        }
+        if itag == 43 {
+            height = 360;
+        }
+        if itag == 44 {
+            height = 480;
+        }
+        if itag == 45 {
+            height = 720;
+        }
+        if itag == 46 {
+            height = 1080;
+        }
+        if itag == 59 {
+            height = 480;
+        }
+        if itag == 78 {
+            height = 480;
+        }
+        if itag == 82 {
+            height = 360;
+        }
+        if itag == 83 {
+            height = 480;
+        }
+        if itag == 84 {
+            height = 720;
+        }
+        if itag == 85 {
+            height = 1080;
+        }
+        if itag == 91 {
+            height = 144;
+        }
+        if itag == 92 {
+            height = 240;
+        }
+        if itag == 93 {
+            height = 360;
+        }
+        if itag == 94 {
+            height = 480;
+        }
+        if itag == 95 {
+            height = 720;
+        }
+        if itag == 96 {
+            height = 1080;
+        }
+        if itag == 100 {
+            height = 360;
+        }
+        if itag == 101 {
+            height = 480;
+        }
+        if itag == 102 {
+            height = 720;
+        }
+        if itag == 132 {
+            height = 240;
+        }
+        if itag == 151 {
+            height = 144;
+        }
+        if itag == 133 {
+            height = 240;
+        }
+        if itag == 134 {
+            height = 360;
+        }
+        if itag == 135 {
+            height = 480;
+        }
+        if itag == 136 {
+            height = 720;
+        }
+        if itag == 137 {
+            height = 1080;
+        }
+        if itag == 138 {
+            height = 4320;
+        }
+        if itag == 142 {
+            height = 240;
+        }
+        if itag == 143 {
+            height = 360;
+        }
+        if itag == 144 {
+            height = 480;
+        }
+        if itag == 145 {
+            height = 720;
+        }
+        if itag == 146 {
+            height = 1080;
+        }
+        if itag == 160 {
+            height = 144;
+        }
+        if itag == 161 {
+            height = 144;
+        }
+        if itag == 167 {
+            height = 360;
+        }
+        if itag == 168 {
+            height = 480;
+        }
+        if itag == 169 {
+            height = 720;
+        }
+        if itag == 170 {
+            height = 1080;
+        }
+        if itag == 212 {
+            height = 480;
+        }
+        if itag == 213 {
+            height = 480;
+        }
+        if itag == 214 {
+            height = 720;
+        }
+        if itag == 215 {
+            height = 720;
+        }
+        if itag == 216 {
+            height = 1080;
+        }
+        if itag == 217 {
+            height = 1080;
+        }
+        if itag == 218 {
+            height = 480;
+        }
+        if itag == 219 {
+            height = 480;
+        }
+        if itag == 222 {
+            height = 480;
+        }
+        if itag == 223 {
+            height = 480;
+        }
+        if itag == 224 {
+            height = 720;
+        }
+        if itag == 225 {
+            height = 720;
+        }
+        if itag == 226 {
+            height = 1080;
+        }
+        if itag == 227 {
+            height = 1080;
+        }
+        if itag == 242 {
+            height = 240;
+        }
+        if itag == 243 {
+            height = 360;
+        }
+        if itag == 244 {
+            height = 480;
+        }
+        if itag == 245 {
+            height = 480;
+        }
+        if itag == 246 {
+            height = 480;
+        }
+        if itag == 247 {
+            height = 720;
+        }
+        if itag == 248 {
+            height = 1080;
+        }
+        if itag == 264 {
+            height = 1440;
+        }
+        if itag == 266 {
+            height = 2160;
+        }
+        if itag == 271 {
+            height = 1440;
+        }
+        if itag == 272 {
+            height = 2160;
+        }
+        if itag == 278 {
+            height = 144;
+        }
+        if itag == 298 {
+            height = 720;
+        }
+        if itag == 299 {
+            height = 1080;
+        }
+        if itag == 302 {
+            height = 720;
+        }
+        if itag == 303 {
+            height = 1080;
+        }
+        if itag == 308 {
+            height = 1440;
+        }
+        if itag == 313 {
+            height = 2160;
+        }
+        if itag == 315 {
+            height = 2160;
+        }
+        if itag == 330 {
+            height = 144;
+        }
+        if itag == 331 {
+            height = 240;
+        }
+        if itag == 332 {
+            height = 360;
+        }
+        if itag == 333 {
+            height = 480;
+        }
+        if itag == 334 {
+            height = 720;
+        }
+        if itag == 335 {
+            height = 1080;
+        }
+        if itag == 336 {
+            height = 1440;
+        }
+        if itag == 337 {
+            height = 2160;
+        }
+        if itag == 399 {
+            height = 1080;
+        }
+        if itag == 398 {
+            height = 720;
+        }
+        if itag == 397 {
+            height = 480;
+        }
+        if itag == 396 {
+            height = 360;
+        }
+        if itag == 395 {
+            height = 240;
+        }
+        if itag == 394 {
+            height = 144;
+        }
+
+        if height == 0 {
+            return Result.Err(YoutubeError("extraction", "unrecognized video quality itag"));
+        }
+        let label = height.to_string() + "p";
+        if rate > 30 {
+            label = label + ((((long)rate + 9L) / 10L) * 10L).to_string();
+        }
+        return Result.Ok(VideoQuality(label, height, rate));
+    }
+
+    internal fun default_resolution(): Resolution {
+        let height = this.height_value;
+        let width = (int)((16L * (long)height) / 9L);
+        if height == 144 {
+            width = 256;
+        }
+        if height == 240 {
+            width = 426;
+        }
+        if height == 360 {
+            width = 640;
+        }
+        if height == 480 {
+            width = 854;
+        }
+        if height == 720 {
+            width = 1280;
+        }
+        if height == 1080 {
+            width = 1920;
+        }
+        if height == 1440 {
+            width = 2560;
+        }
+        if height == 2160 {
+            width = 3840;
+        }
+        if height == 2880 {
+            width = 5120;
+        }
+        if height == 3072 {
+            width = 4096;
+        }
+        if height == 4320 {
+            width = 7680;
+        }
+        return Resolution(width, height);
+    }
+}

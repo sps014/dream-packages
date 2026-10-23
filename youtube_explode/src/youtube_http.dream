@@ -1,0 +1,57 @@
+module youtube_explode;
+import system;
+import system.net;
+
+internal static class YoutubeHttp {
+    internal static fun endpoint(origin: string, path: string): Result<Url, YoutubeError> {
+        let base = Url.parse(origin);
+        if base.is_err() || !(base.unwrap().scheme == "http" || base.unwrap().scheme == "https") {
+            return Result.Err(
+                YoutubeError("invalid_input", "YouTube origin must be an absolute HTTP URL")
+            );
+        }
+        let resolved = base.unwrap().resolve(path);
+        if resolved.is_err() {
+            return Result.Err(YoutubeError("invalid_input", "invalid YouTube endpoint"));
+        }
+        return Result.Ok(resolved.unwrap());
+    }
+
+    internal static async fun text(
+        http: HttpClient,
+        request: HttpRequest,
+        token: Option<CancellationToken>
+    ): Result<string, YoutubeError> {
+        let effective = CancellationToken.resolve(token);
+        let sent = http.send(request, effective).await;
+        if sent.is_err() {
+            let error = sent.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
+            );
+        }
+        let response = sent.unwrap();
+        if response.status < 200 || response.status >= 300 {
+            let status = response.status;
+            response.close();
+            return Result.Err(
+                YoutubeError(
+                    status == 429 ? "rate_limited" : "http",
+                    "YouTube request returned HTTP " + status.to_string()
+                )
+            );
+        }
+        let body = response.read_text(16777216, effective).await;
+        response.close();
+        if body.is_err() {
+            let error = body.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
+            );
+        }
+        if effective.is_some() && effective.unwrap().is_cancelled {
+            return Result.Err(YoutubeError("cancelled", "YouTube request cancelled"));
+        }
+        return Result.Ok(body.unwrap());
+    }
+}

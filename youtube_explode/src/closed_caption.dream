@@ -1,0 +1,41 @@
+module youtube_explode;
+import system;
+
+/// One caption, including optional word/segment timing.
+public class ClosedCaption {
+    /// Caption text, including spaces and embedded line breaks.
+    public text: string;
+
+    /// Offset from video start, in milliseconds.
+    public offset_ms: double;
+
+    /// Display duration, in milliseconds.
+    public duration_ms: double;
+
+    /// Ordered timed segments; empty when the track does not include them.
+    public parts: ClosedCaptionPart[];
+
+    /// Creates a caption with absolute timing and optional relative segment timings.
+    public constructor(
+        text: string,
+        offset_ms: double,
+        duration_ms: double,
+        parts: ClosedCaptionPart[]
+    ) {
+        this.text = text;
+        this.offset_ms = offset_ms;
+        this.duration_ms = duration_ms;
+        this.parts = parts.slice(0, parts.length);
+    }
+
+    /// Returns the first segment whose offset is at or after relative_time_ms, matching upstream.
+    /// Returns None when no segment satisfies the comparison.
+    public fun get_part_by_time(relative_time_ms: double): Option<ClosedCaptionPart> {
+        for (let part in this.parts) {
+            if part.offset_ms >= relative_time_ms {
+                return Option.Some(part);
+            }
+        }
+        return Option.None;
+    }
+}

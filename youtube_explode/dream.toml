@@ -1,0 +1,13 @@
+[package]
+name = "youtube_explode"
+version = "0.1.0"
+type = "lib"
+edition = "2026"
+authors = ["Shivendra Pratap Singh <shivendrapsingh014@gmail.com>"]
+description = "YouTube metadata, streams, playlists, search, and captions for Dream"
+license = "MIT"
+keywords = ["youtube", "video", "captions"]
+
+[dependencies]
+markup = { version = "0.1.0", path = "../markup" }
+sha1 = { version = "0.1.0", path = "../sha1" }

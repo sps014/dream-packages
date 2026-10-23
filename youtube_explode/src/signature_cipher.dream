@@ -1,0 +1,163 @@
+module youtube_explode;
+import system;
+import system.text;
+import system.collections;
+
+/// A signature transform extracted from YouTube player JavaScript. Does not evaluate JavaScript.
+public class SignatureCipher {
+    timestamp: string;
+    operations: int[];
+    arguments: int[];
+
+    constructor(timestamp: string, operations: int[], arguments: int[]) {
+        this.timestamp = timestamp;
+        this.operations = operations;
+        this.arguments = arguments;
+    }
+
+    /// Signature timestamp associated with this player version.
+    public get signature_timestamp(): string {
+        return this.timestamp;
+    }
+
+    static fun quoted(value: string): string {
+        let out = StringBuilder();
+        for (let c in value) {
+            if "\\.^$|?*+()[]{}".contains(c.as_string()) {
+                out.append_char((char)92);
+            }
+            out.append_char(c);
+        }
+        return out.to_string();
+    }
+
+    static fun capture(source: string, pattern: string): string {
+        let matched = Regex.compile(pattern).unwrap().match(source);
+        return matched.length > 1 ? matched[1] : "";
+    }
+
+    /// Extracts the upstream reverse/swap/splice transform and timestamp from player source.
+    /// Unknown operations or incomplete definitions return extraction instead of producing a bad signature.
+    public static fun parse(source: string): Result<SignatureCipher, YoutubeError> {
+        let timestamp = SignatureCipher.capture(
+            source,
+            "(?:signatureTimestamp|sts)\\s*:\\s*(\\d{5})"
+        );
+        let callsite = Regex.compile(
+            "(?s)[$_\\w]+=function\\([$_\\w]+\\)\\{([$_\\w]+)=\\1\\.split\\(['\"]{2}\\);.*?return \\1\\.join\\(['\"]{2}\\)\\}"
+        ).unwrap().match(source);
+        if timestamp.is_empty() || callsite.length == 0 {
+            return Result.Err(
+                YoutubeError("extraction", "player signature timestamp or transform is missing")
+            );
+        }
+        let container = SignatureCipher.capture(
+            callsite[0],
+            "([$_\\w]+)\\.[$_\\w]+\\([$_\\w]+,\\d+\\);"
+        );
+        if container.is_empty() {
+            return Result.Err(YoutubeError("extraction", "signature helper object is missing"));
+        }
+        let definition = Regex.compile(
+            "(?s)var\\s+" + SignatureCipher.quoted(container) + "=\\{.*?\\};"
+        ).unwrap().match(source);
+        if definition.length == 0 {
+            return Result.Err(YoutubeError("extraction", "signature helper definition is missing"));
+        }
+        let swap = SignatureCipher.capture(
+            definition[0],
+            "(?s)([$_\\w]+):function\\([$_\\w]+,[$_\\w]+\\)\\{+[^}]*?%[^}]*?\\}"
+        );
+        let splice = SignatureCipher.capture(
+            definition[0],
+            "(?s)([$_\\w]+):function\\([$_\\w]+,[$_\\w]+\\)\\{+[^}]*?splice[^}]*?\\}"
+        );
+        let reverse = SignatureCipher.capture(
+            definition[0],
+            "(?s)([$_\\w]+):function\\([$_\\w]+\\)\\{+[^}]*?reverse[^}]*?\\}"
+        );
+        let operations = List<int>();
+        let arguments = List<int>();
+        for (let statement in callsite[0].split(';')) {
+            let name = SignatureCipher.capture(
+                statement,
+                SignatureCipher.quoted(container) + "\\.([$_\\w]+)\\([$_\\w]+(?:,\\d+)?\\)"
+            );
+            if name.is_empty() {
+                continue;
+            }
+            let operation = name == swap ? 0 : (name == splice ? 1 : (name == reverse ? 2 : -1));
+            if operation < 0 {
+                return Result.Err(
+                    YoutubeError("extraction", "unknown signature transform operation")
+                );
+            }
+            let argument = 0;
+            if operation != 2 {
+                let parsed = int.parse(SignatureCipher.capture(statement, "\\([$_\\w]+,(\\d+)\\)"));
+                if parsed.is_err() {
+                    return Result.Err(
+                        YoutubeError("extraction", "invalid signature transform argument")
+                    );
+                }
+                argument = parsed.unwrap();
+            }
+            operations.push(operation);
+            arguments.push(argument);
+        }
+        if operations.is_empty() {
+            return Result.Err(YoutubeError("extraction", "signature transform has no operations"));
+        }
+        return Result.Ok(
+            SignatureCipher(timestamp, operations.take_array(), arguments.take_array())
+        );
+    }
+
+    /// Applies the parsed transform. Invalid indices return extraction; input is never modified.
+    public fun decipher(signature: string): Result<string, YoutubeError> {
+        let chars = List<char>();
+        for (let c in signature) {
+            chars.push(c);
+        }
+        let start = 0;
+        let i = 0;
+        while i < this.operations.length {
+            let operation = this.operations[i];
+            let argument = this.arguments[i];
+            if operation == 0 {
+                if start >= chars.length || argument >= chars.length - start {
+                    return Result.Err(
+                        YoutubeError("extraction", "signature swap index is out of range")
+                    );
+                }
+                let value = chars[start];
+                chars[start] = chars[start + argument];
+                chars[start + argument] = value;
+            } else if operation == 1 {
+                if argument > chars.length - start {
+                    return Result.Err(
+                        YoutubeError("extraction", "signature splice index is out of range")
+                    );
+                }
+                start = start + argument;
+            } else {
+                let left = start;
+                let right = chars.length - 1;
+                while left < right {
+                    let value = chars[left];
+                    chars[left] = chars[right];
+                    chars[right] = value;
+                    left = left + 1;
+                    right = right - 1;
+                }
+            }
+            i = i + 1;
+        }
+        let out = StringBuilder();
+        while start < chars.length {
+            out.append_char(chars[start]);
+            start = start + 1;
+        }
+        return Result.Ok(out.to_string());
+    }
+}

@@ -1,0 +1,142 @@
+module youtube_explode_tests;
+import system;
+import system.json;
+import system.net;
+import system.testing;
+import youtube_explode;
+
+fun cipher_fixture(): string {
+    return "var H$={sw:function(a,b){var c=a[0];a[0]=a[b%a.length];a[b]=c},sp:function(a,b){a.splice(0,b)},rv:function(a){a.reverse()}};S=function(a){a=a.split(\"\");H$.sw(a,2);H$.rv(a,0);H$.sp(a,1);return a.join(\"\")};signatureTimestamp:12345";
+}
+
+fun stream_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"streamingData\": {\"formats\": [{\"itag\": 18, \"url\": \"https://example.test/mux\", \"mimeType\": \"video/mp4; codecs=\\\"avc1.42001E, mp4a.40.2\\\"\", \"bitrate\": 500000}], \"adaptiveFormats\": [{\"itag\": 140, \"url\": \"https://example.test/audio?clen=12345\", \"mimeType\": \"audio/mp4; codecs=\\\"mp4a.40.2\\\"\", \"bitrate\": 128000, \"audioTrack\": {\"id\": \"en.1\", \"displayName\": \"English\", \"audioIsDefault\": true}}, {\"itag\": 299, \"url\": \"https://example.test/video\", \"contentLength\": \"9007199254740993\", \"mimeType\": \"video/mp4; codecs=\\\"unknown\\\"\", \"bitrate\": 2000000, \"qualityLabel\": \"1080p60 HDR\", \"fps\": 59, \"width\": 1920, \"height\": 1080, \"xtags\": \"CgcKAnNyEgEx\"}, {\"itag\": 999, \"mimeType\": \"audio/mp4\"}], \"dashManifestUrl\": \"https://example.test/dash\", \"hlsManifestUrl\": \"https://example.test/hls\"}}"
+    ).unwrap();
+}
+
+@test
+fun signature_transform_and_validation(): void {
+    let cipher = SignatureCipher.parse(cipher_fixture()).unwrap();
+    Assert.eq(cipher.signature_timestamp, "12345");
+    Assert.eq(cipher.decipher("abcdef").unwrap(), "edabc");
+    Assert.is_true(cipher.decipher("a").is_err());
+    Assert.is_true(SignatureCipher.parse("unrelated JavaScript").is_err());
+    Assert.is_true(
+        SignatureCipher.parse(cipher_fixture().replace("H$.sp(a,1)", "H$.unknown(a,1)")).is_err()
+    );
+}
+
+@test
+fun malformed_stream_dimensions_and_codecs(): void {
+    Assert.is_true(VideoQuality.parse("2147483647p").is_err());
+    Assert.is_true(VideoQuality.parse("1080p", 0).is_err());
+    let response = stream_fixture();
+    let format = response["streamingData"]["formats"].at(0).unwrap();
+    format["mimeType"] = JsonValue.from_string("text/mp4; codecs=\"avc1\"");
+    Assert.is_true(StreamManifest.from_player_response(response).is_err());
+    format["mimeType"] = JsonValue.from_string("video/mp4; codecs=\"avc1, \"");
+    Assert.is_true(StreamManifest.from_player_response(response).is_err());
+    format["mimeType"] = JsonValue.from_string("video/mp4; codecs=\"avc1\"");
+    format["fps"] = JsonValue.from_int(-1);
+    Assert.is_true(StreamManifest.from_player_response(response).is_err());
+}
+
+@test
+fun streams_formats_selection_languages_and_sizes(): void {
+    let json = stream_fixture();
+    let original = Json.serialize(json);
+    let manifest = StreamManifest.from_player_response(json).unwrap();
+    Assert.eq(manifest.streams.length, 3);
+    Assert.eq(manifest.filter(StreamKind.Muxed).length, 1);
+    Assert.eq(manifest.filter(StreamKind.AudioOnly).length, 1);
+    Assert.eq(manifest.filter(StreamKind.VideoOnly).length, 1);
+    let audio = manifest.filter(StreamKind.AudioOnly)[0];
+    Assert.eq(audio.audio_language.unwrap().code, "en");
+    Assert.is_true(audio.is_audio_language_default.unwrap());
+    Assert.eq(audio.content_length.unwrap(), 12345L);
+    Assert.eq(audio.audio_codec.unwrap(), "mp4a.40.2");
+    Assert.is_true(audio.video_quality.is_none());
+    let video = manifest.highest_video_quality().unwrap();
+    Assert.eq(video.video_codec.unwrap(), "av01.0.05M.08");
+    Assert.eq(video.content_length.unwrap(), 9007199254740993L);
+    Assert.is_true(video.is_video_upscaled);
+    Assert.eq(video.video_quality.unwrap().label, "1080p60 HDR");
+    Assert.eq(video.video_quality.unwrap().framerate, 60);
+    Assert.eq(manifest.highest_bitrate().unwrap().itag, 299);
+    Assert.eq(manifest.highest_bitrate(Option.Some(StreamKind.AudioOnly)).unwrap().itag, 140);
+    Assert.eq(manifest.dash_manifest_url.unwrap(), "https://example.test/dash");
+    Assert.eq(manifest.hls_manifest_url.unwrap(), "https://example.test/hls");
+    let muxed = manifest.filter(StreamKind.Muxed)[0];
+    Assert.eq(muxed.video_quality.unwrap().label, "360p");
+    Assert.eq(muxed.video_resolution.unwrap().width, 640);
+    Assert.is_true(muxed.content_length.is_none());
+    Assert.eq(Json.serialize(json), original);
+    let snapshot = manifest.streams;
+    snapshot[0] = audio;
+    Assert.eq(manifest.streams[0].kind, StreamKind.Muxed);
+    Assert.is_true(
+        StreamManifest.from_player_response(JsonValue.dict()).unwrap().highest_bitrate().is_none()
+    );
+    Assert.is_true(VideoQuality.parse("invalid").is_err());
+    Assert.eq(VideoQuality.parse("1080s", 24).unwrap().max_height, 1080);
+}
+
+@test
+fun cipher_stream_urls_and_malformed_formats(): void {
+    let response = JsonValue.dict();
+    let data = JsonValue.dict();
+    response["streamingData"] = data;
+    let formats = JsonValue.array();
+    data["formats"] = formats;
+    let format = Json.deserialize<JsonValue>(
+        "{\"itag\": 140, \"url\": \"https://example.test/audio?clen=12345\", \"mimeType\": \"audio/mp4; codecs=\\\"mp4a.40.2\\\"\", \"bitrate\": 128000, \"audioTrack\": {\"id\": \"en.1\", \"displayName\": \"English\", \"audioIsDefault\": true}}"
+    ).unwrap();
+    format.remove("url");
+    format["signatureCipher"] = JsonValue.from_string(
+        "url=https%3A%2F%2Fexample.test%2Faudio%3Fkeep%3D1&s=abcdef&sp=signature"
+    );
+    formats.push(format);
+    Assert.is_true(StreamManifest.from_player_response(response).is_err());
+    let stream = StreamManifest.from_player_response(
+        response,
+        Option.Some(SignatureCipher.parse(cipher_fixture()).unwrap())
+    ).unwrap().streams[0];
+    let url = Url.parse(stream.url).unwrap();
+    Assert.eq(url.query.get("signature").unwrap(), "edabc");
+    Assert.eq(url.query.get("keep").unwrap(), "1");
+    format.remove("itag");
+    Assert.is_true(
+        StreamManifest.from_player_response(
+            response,
+            Option.Some(SignatureCipher.parse(cipher_fixture()).unwrap())
+        ).is_err()
+    );
+    format["itag"] = JsonValue.from_int(140);
+    format["contentLength"] = JsonValue.from_string("-1");
+    Assert.is_true(
+        StreamManifest.from_player_response(
+            response,
+            Option.Some(SignatureCipher.parse(cipher_fixture()).unwrap())
+        ).is_err()
+    );
+}
+
+@test
+fun dash_namespaces_and_filters(): void {
+    let xml = "<d:MPD xmlns:d='urn:mpeg:dash:schema:mpd:2011'><d:Period><d:Representation id='140' bandwidth='128000' codecs='mp4a.40.2'><d:BaseURL>https://example.test/audio?mime=audio%2Fmp4&amp;clen=123</d:BaseURL><d:AudioChannelConfiguration value='2'/></d:Representation><d:Representation id='299' bandwidth='2000000' codecs='avc1.640028' width='1920' height='1080' frameRate='60' contentLength='999'><d:BaseURL>https://example.test/mime/video%2Fmp4/clen/999</d:BaseURL></d:Representation><d:Representation id='rawcc' codecs='rawcc'/><d:Representation id='18' bandwidth='1' codecs='avc1'><d:BaseURL>https://example.test/mime/video%2Fmp4</d:BaseURL><d:SegmentList><d:Initialization sourceURL='sq/0'/></d:SegmentList></d:Representation><d:Representation id='22' bandwidth='1'/></d:Period></d:MPD>";
+    let manifest = StreamManifest.from_dash(xml).unwrap();
+    Assert.eq(manifest.streams.length, 2);
+    Assert.eq(manifest.streams[0].kind, StreamKind.AudioOnly);
+    Assert.eq(manifest.streams[0].content_length.unwrap(), 123L);
+    Assert.eq(manifest.streams[1].kind, StreamKind.VideoOnly);
+    Assert.eq(manifest.streams[1].content_length.unwrap(), 999L);
+    Assert.eq(manifest.streams[1].video_quality.unwrap().label, "1080p60");
+    Assert.eq(manifest.streams[1].video_resolution.unwrap().width, 1920);
+    Assert.is_true(StreamManifest.from_dash("<broken>").is_err());
+    Assert.is_true(
+        StreamManifest.from_dash(
+            "<MPD><Representation id='18' bandwidth='1' codecs='avc1'><BaseURL>https://example.test/no-mime</BaseURL></Representation></MPD>"
+        ).is_err()
+    );
+}

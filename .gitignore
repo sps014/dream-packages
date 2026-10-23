@@ -1,5 +1,6 @@
 dream_packages/
 target/
+generated/
 .DS_Store
 
 /dream.lock

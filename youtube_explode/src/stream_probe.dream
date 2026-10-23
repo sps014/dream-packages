@@ -1,0 +1,10 @@
+module youtube_explode;
+import system;
+
+internal class StreamProbe {
+    internal value: Option<StreamInfo>;
+
+    internal constructor(value: Option<StreamInfo>) {
+        this.value = value;
+    }
+}

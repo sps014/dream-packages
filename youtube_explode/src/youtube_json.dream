@@ -1,0 +1,113 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.text;
+
+internal static class YoutubeJson {
+    internal static fun path(root: JsonValue, keys: string[]): JsonValue {
+        let value = root;
+        for (let key in keys) {
+            value = value.get(key).unwrap_or(JsonValue.null());
+        }
+        return value;
+    }
+
+    internal static fun text(value: JsonValue): string {
+        let simple = value.get("simpleText").unwrap_or(JsonValue.null()).as_string();
+        if simple.is_some() {
+            return simple.unwrap();
+        }
+        let runs = value.get("runs").unwrap_or(JsonValue.null());
+        let out = StringBuilder();
+        let i = 0;
+        while runs.is_array() && i < runs.length {
+            out.append(YoutubeJson.path(runs.at(i).unwrap(), ["text"]).as_string().unwrap_or(""));
+            i = i + 1;
+        }
+        return out.to_string();
+    }
+
+    internal static fun integer(value: JsonValue): Option<long> {
+        let text = value.as_string();
+        if text.is_some() {
+            let parsed = long.parse(text.unwrap());
+            return parsed.is_ok() ? Option.Some(parsed.unwrap()) : Option.None;
+        }
+        let number = value.as_double();
+        if number.is_none() {
+            return Option.None;
+        }
+        let n = number.unwrap();
+        if n != n || n < -9007199254740991.0d || n > 9007199254740991.0d {
+            return Option.None;
+        }
+        let integer = (long)n;
+        return (double)integer == n ? Option.Some(integer) : Option.None;
+    }
+
+    internal static fun number(value: JsonValue): Option<double> {
+        let number = value.as_double();
+        if number.is_none() {
+            let text = value.as_string();
+            if text.is_none() {
+                return Option.None;
+            }
+            let parsed = double.parse(text.unwrap());
+            if parsed.is_err() {
+                return Option.None;
+            }
+            number = Option.Some(parsed.unwrap());
+        }
+        let n = number.unwrap();
+        return n == n && n >= -9000000000000000.0d && n <= 9000000000000000.0d ? number : Option.None;
+    }
+
+    internal static fun date(text: string): Option<DateTime> {
+        if text.length == 10 {
+            text = text + "T00:00:00Z";
+        }
+        let parsed = DateTime.parse(text);
+        return parsed.is_ok() ? Option.Some(parsed.unwrap()) : Option.None;
+    }
+
+    internal static fun assigned(source: string, identifier: string): Option<JsonValue> {
+        let prefix = Regex.compile(identifier + "\\s*=\\s*(\\{)").unwrap().match_info(source);
+        if prefix.is_none() {
+            return Option.None;
+        }
+        let matched = prefix.unwrap().full;
+        let found = source.index_of(matched);
+        if found.is_none() {
+            return Option.None;
+        }
+        let start = found.unwrap() + matched.length - 1;
+        let depth = 0;
+        let quoted = false;
+        let escaped = false;
+        let i = start;
+        while i < source.length {
+            let c = source[i];
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if c == (char)92 {
+                    escaped = true;
+                } else if c == '"' {
+                    quoted = false;
+                }
+            } else if c == '"' {
+                quoted = true;
+            } else if c == '{' {
+                depth = depth + 1;
+            } else if c == '}' {
+                depth = depth - 1;
+                if depth == 0 {
+                    let parsed = Json.deserialize<JsonValue>(source.substring(start, i + 1));
+                    return parsed.is_ok() ? Option.Some(parsed.unwrap()) : Option.None;
+                }
+            }
+            i = i + 1;
+        }
+        return Option.None;
+    }
+}

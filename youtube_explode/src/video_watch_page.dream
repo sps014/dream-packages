@@ -1,0 +1,84 @@
+module youtube_explode;
+import system;
+import system.text;
+import system.json;
+import markup;
+
+internal class VideoWatchPage {
+    internal response: Option<JsonValue>;
+    internal upload_date: Option<DateTime>;
+    internal likes: long;
+    internal dislikes: long;
+
+    constructor(response: Option<JsonValue>, date: Option<DateTime>, likes: long, dislikes: long) {
+        this.response = response;
+        this.upload_date = date;
+        this.likes = likes;
+        this.dislikes = dislikes;
+    }
+
+    static fun count(source: string, pattern: string): long {
+        let matches = Regex.compile(pattern).unwrap().match(source);
+        if matches.length < 2 {
+            return 0L;
+        }
+        let digits = StringBuilder();
+        for (let c in matches[1]) {
+            if c.is_digit() {
+                digits.append_char(c);
+            }
+        }
+        let parsed = long.parse(digits.to_string());
+        return parsed.is_ok() ? parsed.unwrap() : 0L;
+    }
+
+    internal static fun parse(source: string): Result<VideoWatchPage, YoutubeError> {
+        let parsed = MarkupDocument.parse_html(source);
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", parsed.unwrap_err().message));
+        }
+        let page = parsed.unwrap();
+        if page.query(MarkupSelector.parse("#player").unwrap()).length == 0 {
+            return Result.Err(YoutubeError("extraction", "watch page is missing the player"));
+        }
+        if page.query(MarkupSelector.parse("meta[property='og:url']").unwrap()).length == 0 {
+            return Result.Err(YoutubeError("unavailable", "video is not available"));
+        }
+        let date: Option<DateTime> = Option.None;
+        for (let key in ["uploadDate", "datePublished"]) {
+            if date.is_some() {
+                break;
+            }
+            let nodes = page.query(MarkupSelector.parse("meta[itemprop='" + key + "']").unwrap());
+            if nodes.length > 0 {
+                date = YoutubeJson.date(nodes[0].attribute("content").unwrap_or(""));
+            }
+        }
+        let response: Option<JsonValue> = Option.None;
+        let config: Option<JsonValue> = Option.None;
+        for (let script in page.elements("script")) {
+            let text = script.text_content();
+            if response.is_none() {
+                response = YoutubeJson.assigned(text, "(?:var\\s+)?ytInitialPlayerResponse");
+            }
+            if config.is_none() {
+                config = YoutubeJson.assigned(text, "ytplayer\\.config");
+            }
+        }
+        if response.is_none() && config.is_some() {
+            let text = YoutubeJson.path(config.unwrap(), ["args", "player_response"]).as_string();
+            if text.is_some() {
+                let json = Json.deserialize<JsonValue>(text.unwrap());
+                if json.is_ok() {
+                    response = Option.Some(json.unwrap());
+                }
+            }
+        }
+        let likes = VideoWatchPage.count(source, "\"\\s*:\\s*\"([0-9,.]+) likes\"");
+        if likes == 0L {
+            likes = VideoWatchPage.count(source, "along with ([0-9,.]+) other people\"");
+        }
+        let dislikes = VideoWatchPage.count(source, "\"\\s*:\\s*\"([0-9,.]+) dislikes\"");
+        return Result.Ok(VideoWatchPage(response, date, likes, dislikes));
+    }
+}

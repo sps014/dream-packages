@@ -1,0 +1,37 @@
+module youtube_explode;
+import system;
+
+/// Video engagement statistics; hidden statistics use zero.
+public class Engagement {
+    view_count_value: long;
+    like_count_value: long;
+    dislike_count_value: long;
+
+    /// Creates video engagement statistics; hidden statistics use zero.
+    public constructor(view_count: long, like_count: long, dislike_count: long) {
+        this.view_count_value = view_count;
+        this.like_count_value = like_count;
+        this.dislike_count_value = dislike_count;
+    }
+
+    /// Number of views.
+    public get view_count(): long {
+        return this.view_count_value;
+    }
+
+    /// Number of likes; zero when hidden or unavailable.
+    public get like_count(): long {
+        return this.like_count_value;
+    }
+
+    /// Number of dislikes; usually unavailable and zero.
+    public get dislike_count(): long {
+        return this.dislike_count_value;
+    }
+
+    /// Rating on a 1..5 scale, or zero when both reaction counts are zero.
+    public get average_rating(): double {
+        let total = (double)this.like_count_value + (double)this.dislike_count_value;
+        return total == 0.0d ? 0.0d : 1.0d + 4.0d * (double)this.like_count_value / total;
+    }
+}

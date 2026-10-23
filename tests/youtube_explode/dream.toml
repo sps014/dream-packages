@@ -1,0 +1,8 @@
+[package]
+name = "youtube_explode_tests"
+version = "0.1.0"
+type = "test"
+[dependencies]
+youtube_explode = { path = "../../youtube_explode" }
+[test]
+targets = ["native", "node"]

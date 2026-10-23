@@ -1,0 +1,45 @@
+module youtube_explode;
+import system;
+import system.net;
+
+/// Fetches video metadata using watch pages and the upstream player-client fallbacks.
+public class VideoClient {
+    internal controller: VideoController;
+
+    /// Shares a caller-owned HTTP client. origin selects the YouTube server or an HTTP fixture/mirror.
+    /// Request bodies are limited to 16 MiB; broken watch pages are retried at most five times.
+    public constructor(http: HttpClient, origin: string = "https://www.youtube.com") {
+        this.controller = VideoController(http, origin);
+    }
+
+    /// Fetches a watch page, then resolves a player response when inline data is absent.
+    /// VisionOS is tried first and Android is used only for unavailable/unplayable responses.
+    /// Preserves cancellation and typed transport/extraction failures; received bodies are closed.
+    public async fun get(
+        id: VideoId,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Video, YoutubeError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let watched = lifetime[0].controller.watch(id, effective).await;
+        if watched.is_err() {
+            return Result.Err(watched.unwrap_err());
+        }
+        let page = watched.unwrap();
+        let response = page.response;
+        if response.is_none() {
+            let resolved = lifetime[0].controller.player(id, Option.None, effective).await;
+            if resolved.is_err() {
+                return Result.Err(resolved.unwrap_err());
+            }
+            response = Option.Some(resolved.unwrap());
+        }
+        return VideoMetadata.parse(
+            id,
+            response.unwrap(),
+            page.upload_date,
+            page.likes,
+            page.dislikes
+        );
+    }
+}

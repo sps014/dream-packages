@@ -1,0 +1,119 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.text;
+import system.net;
+import system.collections;
+import markup;
+
+internal static class DashManifest {
+    internal static fun parse(source: string): Result<StreamManifest, YoutubeError> {
+        let parsed = MarkupDocument.parse_xml(source);
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", parsed.unwrap_err().message));
+        }
+        let streams = List<StreamInfo>();
+        for (let node in parsed.unwrap().query(MarkupSelector.parse("*|Representation").unwrap())) {
+            let id = node.attribute("id").unwrap_or("");
+            let numeric = !id.is_empty();
+            for (let c in id) {
+                if !c.is_digit() {
+                    numeric = false;
+                }
+            }
+            if !numeric {
+                continue;
+            }
+            let codec = node.attribute("codecs").unwrap_or("");
+            if codec.trim().is_empty() {
+                continue;
+            }
+            let skip = false;
+            for (let init in node.query(MarkupSelector.parse("*|Initialization").unwrap())) {
+                if init.attribute("sourceURL").unwrap_or("").contains("sq/") {
+                    skip = true;
+                    break;
+                }
+            }
+            if skip {
+                continue;
+            }
+            let url_text = "";
+            let audio = false;
+            for (let child in node.children) {
+                if child.kind != MarkupKind.Element {
+                    continue;
+                }
+                if child.local_name == "BaseURL" && url_text.is_empty() {
+                    url_text = child.text_content();
+                }
+                if child.local_name == "AudioChannelConfiguration" {
+                    audio = true;
+                }
+            }
+            if url_text.trim().is_empty() {
+                continue;
+            }
+            let url = Url.parse(url_text);
+            if url.is_err() {
+                return Result.Err(YoutubeError("extraction", "invalid DASH stream URL"));
+            }
+            let mime = url.unwrap().query.get("mime").unwrap_or("");
+            let container = "";
+            if mime.contains("/") {
+                container = mime.split('/')[1];
+            } else {
+                let matched = Regex.compile("mime[/=]\\w*%2[Ff]([\\w\\d]+)")
+                    .unwrap()
+                    .match(url_text);
+                if matched.length > 1 {
+                    container = matched[1];
+                }
+            }
+            if container.is_empty() {
+                return Result.Err(YoutubeError("extraction", "DASH stream container is missing"));
+            }
+            let value = JsonValue.dict();
+            let itag = int.parse(id);
+            if itag.is_err() {
+                return Result.Err(
+                    YoutubeError("extraction", "DASH stream identifier is out of range")
+                );
+            }
+            value["itag"] = JsonValue.from_int(itag.unwrap());
+            value["url"] = JsonValue.from_string(url_text);
+            value["mimeType"] = JsonValue.from_string(
+                (audio ? "audio/" : "video/") + container + "; codecs=\"" + codec + "\""
+            );
+            let bandwidth = node.attribute("bandwidth").unwrap_or("");
+            value["bitrate"] = JsonValue.from_string(bandwidth);
+            for (let field in ["width", "height", "frameRate"]) {
+                let text = node.attribute(field);
+                if text.is_some() {
+                    let number = int.parse(text.unwrap());
+                    if number.is_ok() {
+                        value[field == "frameRate" ? "fps" : field] = JsonValue.from_int(
+                            number.unwrap()
+                        );
+                    }
+                }
+            }
+            let length = node.attribute("contentLength");
+            if length.is_none() {
+                let matched = Regex.compile("[/\\?]clen[/=](\\d+)").unwrap().match(url_text);
+                if matched.length > 1 {
+                    length = Option.Some(matched[1]);
+                }
+            }
+            if length.is_some() {
+                value["contentLength"] = JsonValue.from_string(length.unwrap());
+            }
+            let stream = StreamMetadata.parse(value, Option.None);
+            if stream.is_err() {
+                return Result.Err(stream.unwrap_err());
+            }
+            streams.push(stream.unwrap());
+        }
+        return Result.Ok(StreamManifest(streams.take_array()));
+    }
+}

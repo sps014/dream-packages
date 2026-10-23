@@ -1,0 +1,67 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.text;
+import system.collections;
+
+/// Available caption tracks and case-insensitive language lookup.
+public class ClosedCaptionManifest {
+    /// Available tracks in YouTube's order.
+    public tracks: ClosedCaptionTrackInfo[];
+
+    /// Creates a manifest from a snapshot of the track array.
+    public constructor(tracks: ClosedCaptionTrackInfo[]) {
+        this.tracks = tracks.slice(0, tracks.length);
+    }
+
+    /// Returns the first track matching a language code or display name, ignoring case.
+    public fun get_by_language(language: string): Option<ClosedCaptionTrackInfo> {
+        let key = language.to_lower();
+        for (let track in this.tracks) {
+            if track.language.code.to_lower() == key || track.language.name.to_lower() == key {
+                return Option.Some(track);
+            }
+        }
+        return Option.None;
+    }
+
+    /// Extracts caption metadata from a YouTube player response. Missing tracks produce an empty manifest.
+    /// Malformed required fields on a reported track return an extraction error.
+    public static fun from_player_response(
+        response: JsonValue
+    ): Result<ClosedCaptionManifest, YoutubeError> {
+        let result = List<ClosedCaptionTrackInfo>();
+        let tracks = YoutubeJson.path(
+            response,
+            ["captions", "playerCaptionsTracklistRenderer", "captionTracks"]
+        );
+        if !tracks.is_null() && !tracks.is_array() {
+            return Result.Err(YoutubeError("extraction", "captionTracks must be an array"));
+        }
+        let i = 0;
+        while i < tracks.length {
+            let track = tracks.at(i).unwrap();
+            let url = YoutubeJson.path(track, ["baseUrl"]).as_string().unwrap_or("");
+            let code = YoutubeJson.path(track, ["languageCode"]).as_string().unwrap_or("");
+            let name = YoutubeJson.text(YoutubeJson.path(track, ["name"]));
+            if url.is_empty() || code.is_empty() || name.is_empty() {
+                return Result.Err(
+                    YoutubeError("extraction", "caption track is missing URL or language metadata")
+                );
+            }
+            result.push(
+                ClosedCaptionTrackInfo(
+                    url,
+                    Language(code, name),
+                    YoutubeJson.path(track, ["vssId"])
+                        .as_string()
+                        .unwrap_or("")
+                        .to_lower()
+                        .starts_with("a.")
+                )
+            );
+            i = i + 1;
+        }
+        return Result.Ok(ClosedCaptionManifest(result.take_array()));
+    }
+}

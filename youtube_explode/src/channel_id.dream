@@ -1,0 +1,42 @@
+module youtube_explode;
+import system;
+
+/// A validated YouTube channel identifier. Parsing accepts a raw value or a recognized YouTube URL.
+public class ChannelId: Equatable<ChannelId> {
+    text: string;
+
+    constructor(text: string) {
+        this.text = text;
+    }
+
+    /// Canonical decoded identifier, without URL prefixes or query parameters.
+    public get value(): string {
+        return this.text;
+    }
+
+    /// Parses the upstream-supported raw/URL forms, returning invalid_input for invalid identifiers.
+    public static fun parse(input: string): Result<ChannelId, YoutubeError> {
+        let value = YoutubeIds.parse(input, "channel");
+        if value.is_none() {
+            return Result.Err(
+                YoutubeError("invalid_input", "invalid YouTube channel identifier or URL")
+            );
+        }
+        return Result.Ok(ChannelId(value.unwrap()));
+    }
+
+    /// Compares canonical identifier values using case-sensitive ordinal equality.
+    public fun equals(borrow other: ChannelId): bool {
+        return this.text == other.text;
+    }
+
+    /// Hashes the canonical value so independently parsed equal identifiers share map/set keys.
+    public override fun hash_code(): int {
+        return this.text.hash_code();
+    }
+
+    /// Returns the canonical identifier.
+    public override fun to_string(): string {
+        return this.text;
+    }
+}

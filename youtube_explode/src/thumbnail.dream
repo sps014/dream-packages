@@ -1,0 +1,44 @@
+module youtube_explode;
+import system;
+
+/// A thumbnail URL and its pixel dimensions.
+public class Thumbnail {
+    url_value: string;
+    resolution_value: Resolution;
+
+    /// Creates a thumbnail URL and its pixel dimensions.
+    public constructor(url: string, resolution: Resolution) {
+        this.url_value = url;
+        this.resolution_value = resolution;
+    }
+
+    /// Image URL supplied by YouTube or a documented default image URL.
+    public get url(): string {
+        return this.url_value;
+    }
+
+    /// Image dimensions in pixels.
+    public get resolution(): Resolution {
+        return this.resolution_value;
+    }
+
+    /// Selects the largest image by area; the first wins ties. None for an empty array.
+    public static fun highest_resolution(thumbnails: Thumbnail[]): Option<Thumbnail> {
+        let best: Option<Thumbnail> = Option.None;
+        for (let thumbnail in thumbnails) {
+            if best.is_none() || thumbnail.resolution.area > best.unwrap().resolution.area {
+                best = Option.Some(thumbnail);
+            }
+        }
+        return best;
+    }
+
+    internal static fun defaults(id: VideoId): Thumbnail[] {
+        let base = "https://img.youtube.com/vi/" + id.value + "/";
+        return [
+            Thumbnail(base + "default.jpg", Resolution(120, 90)),
+            Thumbnail(base + "mqdefault.jpg", Resolution(320, 180)),
+            Thumbnail(base + "hqdefault.jpg", Resolution(480, 360))
+        ];
+    }
+}

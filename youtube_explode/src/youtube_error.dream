@@ -1,0 +1,24 @@
+module youtube_explode;
+import system;
+
+/// A categorized extraction or transport failure. Remote input does not throw exceptions.
+public class YoutubeError: Error {
+    error_code: string;
+    error_message: string;
+
+    /// Creates a stable category and human-readable context; supplied cookies/headers must be omitted.
+    public constructor(code: string, message: string) {
+        this.error_code = code;
+        this.error_message = message;
+    }
+
+    /// Stable category: invalid_input, extraction, unavailable, unplayable, http, io, cancelled, or rate_limited.
+    public fun code(): string {
+        return this.error_code;
+    }
+
+    /// Human-readable failure context.
+    public fun message(): string {
+        return this.error_message;
+    }
+}

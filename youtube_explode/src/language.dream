@@ -1,0 +1,17 @@
+module youtube_explode;
+import system;
+
+/// Language metadata associated with captions or audio tracks.
+public class Language {
+    /// ISO language tag, such as en or pt-BR.
+    public code: string;
+
+    /// YouTube's localized display name.
+    public name: string;
+
+    /// Creates language metadata without changing its tag or display name.
+    public constructor(code: string, name: string) {
+        this.code = code;
+        this.name = name;
+    }
+}

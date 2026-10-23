@@ -1,0 +1,11 @@
+module youtube_explode;
+
+/// Media components contained in a downloadable stream.
+public enum StreamKind {
+    /// Audio without video.
+    AudioOnly,
+    /// Video without audio.
+    VideoOnly,
+    /// Audio and video in one container.
+    Muxed,
+}

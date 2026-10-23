@@ -1,0 +1,82 @@
+module youtube_explode;
+import system;
+
+internal class YoutubeProtobuf {
+    bytes: byte[];
+    position: int;
+
+    constructor(bytes: byte[]) {
+        this.bytes = bytes;
+        this.position = 0;
+    }
+
+    fun varint(end: int): Option<ulong> {
+        let value = 0uL;
+        let shift = 0;
+        while this.position < end && shift < 70 {
+            let b = (uint)this.bytes[this.position];
+            this.position = this.position + 1;
+            if shift == 63 && b > 1u {
+                return Option.None;
+            }
+            value = value | ((ulong)(b & 127u) << (ulong)shift);
+            if (b & 128u) == 0u {
+                return Option.Some(value);
+            }
+            shift = shift + 7;
+        }
+        return Option.None;
+    }
+
+    fun text(end: int): Option<string> {
+        let length = this.varint(end);
+        if length.is_none() || length.unwrap() >(ulong)(end - this.position) {
+            return Option.None;
+        }
+        let start = this.position;
+        this.position = this.position + (int)length.unwrap();
+        return Option.Some(Encoding.utf8_decode(this.bytes.slice(start, this.position)));
+    }
+
+    internal static fun upscaled(encoded: string): bool {
+        let decoded = Encoding.base64_decode(encoded);
+        if decoded.is_err() {
+            return false;
+        }
+        let reader = YoutubeProtobuf(decoded.unwrap());
+        let upscaled = false;
+        while reader.position < reader.bytes.length {
+            let tag = reader.varint(reader.bytes.length);
+            let length = reader.varint(reader.bytes.length);
+            if tag.is_none()
+                || length.is_none()
+                || (tag.unwrap() & 7uL)
+                != 2uL || length.unwrap() >(ulong)(reader.bytes.length - reader.position) {
+                return false;
+            }
+            let end = reader.position + (int)length.unwrap();
+            let key = "";
+            let value = "";
+            while reader.position < end {
+                let field = reader.varint(end);
+                if field.is_none() || (field.unwrap() & 7uL) != 2uL {
+                    return false;
+                }
+                let text = reader.text(end);
+                if text.is_none() {
+                    return false;
+                }
+                if (field.unwrap() >> 3) == 1uL {
+                    key = text.unwrap();
+                }
+                if (field.unwrap() >> 3) == 2uL {
+                    value = text.unwrap();
+                }
+            }
+            if key == "sr" {
+                upscaled = value == "1";
+            }
+        }
+        return upscaled;
+    }
+}

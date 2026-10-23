@@ -1,0 +1,17 @@
+module youtube_explode;
+import system;
+
+/// One word or segment in a caption, with timing relative to the caption start.
+public class ClosedCaptionPart {
+    /// Segment text, preserving whitespace and XML-decoded characters.
+    public text: string;
+
+    /// Offset from the caption start in milliseconds, including fractional milliseconds.
+    public offset_ms: double;
+
+    /// Creates a caption segment with a relative millisecond offset.
+    public constructor(text: string, offset_ms: double) {
+        this.text = text;
+        this.offset_ms = offset_ms;
+    }
+}

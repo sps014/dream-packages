@@ -1,0 +1,206 @@
+module youtube_explode;
+import system;
+import system.io;
+import system.net;
+
+/// Seekable HTTP input with bounded range requests and retries from the last delivered byte.
+/// Close explicitly after use. The shared HttpClient remains owned by its caller.
+public class MediaStream: AsyncReader {
+    http: HttpClient;
+    url: string;
+    length_value: long;
+    position: long;
+    segment_length: long;
+    segment_remaining: long;
+    response: Option<HttpResponse>;
+    closed: bool;
+    busy: bool;
+
+    internal constructor(http: HttpClient, info: StreamInfo) {
+        this.http = http;
+        this.url = info.url;
+        this.length_value = info.content_length.unwrap();
+        this.position = 0L;
+        this.segment_length = Url.parse(this.url)
+            .unwrap()
+            .query.get("ratebypass")
+            .unwrap_or("")
+            .to_lower() == "yes" ? this.length_value : 9898989L;
+        this.segment_remaining = 0L;
+        this.response = Option.None;
+        this.closed = false;
+        this.busy = false;
+    }
+
+    del() {
+        this.reset();
+    }
+
+    fun reset(): void {
+        if this.response.is_some() {
+            this.response.unwrap().close();
+            this.response = Option.None;
+        }
+        this.segment_remaining = 0L;
+    }
+
+    /// Total byte length from verified stream metadata.
+    public get length(): long {
+        return this.length_value;
+    }
+
+    /// Reports the next byte position; closed streams return ECLOSED.
+    public fun tell(): Result<long, IoError> {
+        if this.closed {
+            return Result.Err(IoError.closed(""));
+        }
+        return Result.Ok(this.position);
+    }
+
+    /// Moves to an absolute nonnegative byte position, including beyond EOF.
+    /// A pending read rejects seeking with EBUSY; failed seeks preserve position.
+    public fun seek(position: long): Result<Unit, IoError> {
+        if this.closed {
+            return Result.Err(IoError.closed(""));
+        }
+        if this.busy {
+            return Result.Err(IoError("", "EBUSY", "a stream read is pending"));
+        }
+        if position < 0L {
+            return Result.Err(IoError.invalid("", "negative stream position"));
+        }
+        if position != this.position {
+            this.reset();
+            this.position = position;
+        }
+        return Result.Ok(Unit());
+    }
+
+    internal async fun initialize(token: Option<CancellationToken>): Result<Unit, IoError> {
+        let lifetime = [this];
+        CancellationToken.rejected(token, IoError.cancelled())?;
+        if lifetime[0].closed {
+            return Result.Err(IoError.closed(""));
+        }
+        if lifetime[0].response.is_some() || lifetime[0].position >= lifetime[0].length_value {
+            return Result.Ok(Unit());
+        }
+        let count = lifetime[0].length_value - lifetime[0].position;
+        if count > lifetime[0].segment_length {
+            count = lifetime[0].segment_length;
+        }
+        let target = Url.parse(lifetime[0].url).unwrap();
+        target.query.set(
+            "range",
+            lifetime[0].position.to_string() + "-" + (lifetime[0].position + count - 1L).to_string()
+        );
+        let sent = lifetime[0].http.send(HttpRequest(HttpMethod.Get, target), token).await;
+        if sent.is_err() {
+            return Result.Err(IoError("", sent.unwrap_err().code(), sent.unwrap_err().message()));
+        }
+        let response = sent.unwrap();
+        if lifetime[0].closed {
+            response.close();
+            return Result.Err(IoError.closed(""));
+        }
+        if response.status < 200 || response.status >= 300 {
+            let status = response.status;
+            response.close();
+            return Result.Err(IoError("", "EHTTP", "stream returned HTTP " + status.to_string()));
+        }
+        lifetime[0].response = Option.Some(response);
+        lifetime[0].segment_remaining = count;
+        return Result.Ok(Unit());
+    }
+
+    async fun read_next(max_bytes: int, token: Option<CancellationToken>): Result<byte[], IoError> {
+        let lifetime = [this];
+        let retries = 0;
+        while true {
+            CancellationToken.rejected(token, IoError.cancelled())?;
+            if lifetime[0].closed {
+                return Result.Err(IoError.closed(""));
+            }
+            if lifetime[0].position >= lifetime[0].length_value || max_bytes == 0 {
+                let empty: byte[] = [];
+                return Result.Ok(empty);
+            }
+            let opened = lifetime[0].initialize(token).await;
+            if opened.is_err() {
+                let error = opened.unwrap_err();
+                if error.code() == "ECANCELLED" || error.code() == "ECLOSED" || retries >= 5 {
+                    return Result.Err(error);
+                }
+                lifetime[0].reset();
+                retries = retries + 1;
+                continue;
+            }
+            let count = max_bytes;
+            if (long)count > lifetime[0].segment_remaining {
+                count = (int)lifetime[0].segment_remaining;
+            }
+            let read = lifetime[0].response.unwrap().body.read_async(count, token).await;
+            if read.is_err() {
+                let error = read.unwrap_err();
+                lifetime[0].reset();
+                if error.code() == "ECANCELLED" || error.code() == "ECLOSED" || retries >= 5 {
+                    return Result.Err(error);
+                }
+                retries = retries + 1;
+                continue;
+            }
+            let bytes = read.unwrap();
+            if bytes.length == 0 {
+                lifetime[0].reset();
+                if retries >= 5 {
+                    return Result.Err(
+                        IoError("", "EEOF", "stream ended before its reported length")
+                    );
+                }
+                retries = retries + 1;
+                continue;
+            }
+            if bytes.length > count {
+                lifetime[0].reset();
+                return Result.Err(IoError.other("", "HTTP body exceeded requested size"));
+            }
+            lifetime[0].position = lifetime[0].position + (long)bytes.length;
+            lifetime[0].segment_remaining = lifetime[0].segment_remaining - (long)bytes.length;
+            if lifetime[0].segment_remaining == 0L {
+                lifetime[0].reset();
+            }
+            return Result.Ok(bytes);
+        }
+    }
+
+    /// Reads up to max_bytes; a positive read returns empty only at EOF.
+    /// Zero consumes nothing. Negative sizes, closed streams, and concurrent reads fail.
+    /// Transport failures retry at most five times without repeating delivered bytes.
+    public async unique fun read_async(
+        max_bytes: int,
+        token: Option<CancellationToken> = Option.None
+    ): Result<byte[], IoError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        CancellationToken.rejected(effective, IoError.cancelled())?;
+        if lifetime[0].closed {
+            return Result.Err(IoError.closed(""));
+        }
+        if max_bytes < 0 {
+            return Result.Err(IoError.invalid("", "negative read size"));
+        }
+        if lifetime[0].busy {
+            return Result.Err(IoError("", "EBUSY", "a stream read is pending"));
+        }
+        lifetime[0].busy = true;
+        let result = lifetime[0].read_next(max_bytes, effective).await;
+        lifetime[0].busy = false;
+        return result;
+    }
+
+    /// Releases the current response and rejects future reads; safe to call repeatedly.
+    public fun close(): void {
+        this.closed = true;
+        this.reset();
+    }
+}

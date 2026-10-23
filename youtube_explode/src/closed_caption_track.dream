@@ -1,0 +1,129 @@
+module youtube_explode;
+import system;
+import system.text;
+import system.collections;
+import markup;
+
+/// A caption track with srv3 XML parsing, time lookup, and portable SRT serialization.
+public class ClosedCaptionTrack {
+    /// Captions in source order, including whitespace-only captions.
+    public captions: ClosedCaption[];
+
+    /// Creates a track from a snapshot of the supplied caption array.
+    public constructor(captions: ClosedCaption[]) {
+        this.captions = captions.slice(0, captions.length);
+    }
+
+    static fun time(node: MarkupNode, key: string): Option<double> {
+        let text = node.attribute(key);
+        if text.is_none() {
+            return Option.None;
+        }
+        let value = double.parse(text.unwrap());
+        if value.is_err() {
+            return Option.None;
+        }
+        let number = value.unwrap();
+        if number != number || number < -9000000000000000.0d || number > 9000000000000000.0d {
+            return Option.None;
+        }
+        return Option.Some(number);
+    }
+
+    /// Parses YouTube's srv3 XML, including namespace prefixes and CDATA.
+    /// Empty captions or captions without valid t/d timing are skipped; spaces are retained.
+    /// Segment timing uses t, then ac, then zero. XML failures return extraction errors.
+    public static fun parse_xml(source: string): Result<ClosedCaptionTrack, YoutubeError> {
+        let parsed = MarkupDocument.parse_xml(source);
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", parsed.unwrap_err().message));
+        }
+        let captions = List<ClosedCaption>();
+        let selector = MarkupSelector.parse("*|p").unwrap();
+        for (let node in parsed.unwrap().query(selector)) {
+            let text = node.text_content();
+            let offset = ClosedCaptionTrack.time(node, "t");
+            let duration = ClosedCaptionTrack.time(node, "d");
+            if text.is_empty() || offset.is_none() || duration.is_none() {
+                continue;
+            }
+            let parts = List<ClosedCaptionPart>();
+            for (let child in node.children) {
+                if child.kind != MarkupKind.Element || child.local_name != "s" {
+                    continue;
+                }
+                let part_text = child.text_content();
+                if part_text.is_empty() {
+                    continue;
+                }
+                let part_offset = ClosedCaptionTrack.time(child, "t");
+                if part_offset.is_none() {
+                    part_offset = ClosedCaptionTrack.time(child, "ac");
+                }
+                parts.push(ClosedCaptionPart(part_text, part_offset.unwrap_or(0.0d)));
+            }
+            captions.push(
+                ClosedCaption(text, offset.unwrap(), duration.unwrap(), parts.take_array())
+            );
+        }
+        return Result.Ok(ClosedCaptionTrack(captions.take_array()));
+    }
+
+    /// Returns the first caption covering time_ms, including both endpoints, or None.
+    public fun get_by_time(time_ms: double): Option<ClosedCaption> {
+        for (let caption in this.captions) {
+            if time_ms >= caption.offset_ms && time_ms <= caption.offset_ms + caption.duration_ms {
+                return Option.Some(caption);
+            }
+        }
+        return Option.None;
+    }
+
+    static fun pad(value: long, width: int): string {
+        let text = value.to_string();
+        while text.length < width {
+            text = "0" + text;
+        }
+        return text;
+    }
+
+    static fun timestamp(value: double): string {
+        let ms = (long)value;
+        return ClosedCaptionTrack.pad(ms / 3600000L, 2)
+            + ":"
+            + ClosedCaptionTrack.pad((ms / 60000L) % 60L, 2)
+            + ":"
+            + ClosedCaptionTrack.pad((ms / 1000L) % 60L, 2)
+            + "," + ClosedCaptionTrack.pad(ms % 1000L, 3);
+    }
+
+    /// Serializes numbered SRT cues with LF line endings, truncating fractional milliseconds.
+    /// Embedded --> text becomes en-dash arrows to avoid injecting an SRT control sequence.
+    /// Returns invalid_input for negative, nonfinite, or out-of-range cue times.
+    public fun to_srt(): Result<string, YoutubeError> {
+        let out = StringBuilder();
+        let i = 0;
+        for (let caption in this.captions) {
+            let start = caption.offset_ms;
+            let end = start + caption.duration_ms;
+            if start
+                != start
+                || end
+                != end || start < 0.0d || caption.duration_ms < 0.0d || end > 9000000000000000.0d {
+                return Result.Err(
+                    YoutubeError("invalid_input", "caption timing cannot be represented in SRT")
+                );
+            }
+            i = i + 1;
+            out.append(i.to_string());
+            out.append("\n");
+            out.append(ClosedCaptionTrack.timestamp(start));
+            out.append(" --> ");
+            out.append(ClosedCaptionTrack.timestamp(end));
+            out.append("\n");
+            out.append(caption.text.replace("-->", "––>"));
+            out.append("\n\n");
+        }
+        return Result.Ok(out.to_string());
+    }
+}

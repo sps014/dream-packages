@@ -1,0 +1,133 @@
+module youtube_explode;
+import system;
+
+/// Download metadata for a stream, retaining optional language and video properties.
+public class StreamInfo {
+    itag_value: int;
+    url_value: string;
+    kind_value: StreamKind;
+    container_value: string;
+    content_length_value: Option<long>;
+    bitrate_value: long;
+    audio_codec_value: Option<string>;
+    audio_language_value: Option<Language>;
+    is_audio_language_default_value: Option<bool>;
+    video_codec_value: Option<string>;
+    video_quality_value: Option<VideoQuality>;
+    video_resolution_value: Option<Resolution>;
+    is_video_upscaled_value: bool;
+
+    /// Creates stream metadata; sizes are bytes and bitrate is bits/second.
+    public constructor(
+        itag: int,
+        url: string,
+        kind: StreamKind,
+        container: string,
+        content_length: Option<long>,
+        bitrate: long,
+        audio_codec: Option<string>,
+        audio_language: Option<Language>,
+        is_audio_language_default: Option<bool>,
+        video_codec: Option<string>,
+        video_quality: Option<VideoQuality>,
+        video_resolution: Option<Resolution>,
+        is_video_upscaled: bool
+    ) {
+        this.itag_value = itag;
+        this.url_value = url;
+        this.kind_value = kind;
+        this.container_value = container;
+        this.content_length_value = content_length;
+        this.bitrate_value = bitrate;
+        this.audio_codec_value = audio_codec;
+        this.audio_language_value = audio_language;
+        this.is_audio_language_default_value = is_audio_language_default;
+        this.video_codec_value = video_codec;
+        this.video_quality_value = video_quality;
+        this.video_resolution_value = video_resolution;
+        this.is_video_upscaled_value = is_video_upscaled;
+    }
+
+    /// YouTube format identifier.
+    public get itag(): int {
+        return this.itag_value;
+    }
+
+    /// Download URL, with any signature resolved.
+    public get url(): string {
+        return this.url_value;
+    }
+
+    /// Audio-only, video-only, or muxed components.
+    public get kind(): StreamKind {
+        return this.kind_value;
+    }
+
+    /// Container name such as mp4 or webm.
+    public get container(): string {
+        return this.container_value;
+    }
+
+    /// Stream size in bytes; None until a missing size has been probed over HTTP.
+    public get content_length(): Option<long> {
+        return this.content_length_value;
+    }
+
+    /// Bits per second.
+    public get bitrate(): long {
+        return this.bitrate_value;
+    }
+
+    /// Audio codec, when the stream contains audio.
+    public get audio_codec(): Option<string> {
+        return this.audio_codec_value;
+    }
+
+    /// Audio language, when supplied by YouTube.
+    public get audio_language(): Option<Language> {
+        return this.audio_language_value;
+    }
+
+    /// Whether this is the default audio language; None if unspecified.
+    public get is_audio_language_default(): Option<bool> {
+        return this.is_audio_language_default_value;
+    }
+
+    /// Video codec, when the stream contains video.
+    public get video_codec(): Option<string> {
+        return this.video_codec_value;
+    }
+
+    /// Label and frame rate for video streams.
+    public get video_quality(): Option<VideoQuality> {
+        return this.video_quality_value;
+    }
+
+    /// Pixel dimensions for video streams.
+    public get video_resolution(): Option<Resolution> {
+        return this.video_resolution_value;
+    }
+
+    /// Whether YouTube marks the stream as super-resolution upscaled.
+    public get is_video_upscaled(): bool {
+        return this.is_video_upscaled_value;
+    }
+
+    internal fun with_length(length: long): StreamInfo {
+        return StreamInfo(
+            this.itag_value,
+            this.url_value,
+            this.kind_value,
+            this.container_value,
+            Option.Some(length),
+            this.bitrate_value,
+            this.audio_codec_value,
+            this.audio_language_value,
+            this.is_audio_language_default_value,
+            this.video_codec_value,
+            this.video_quality_value,
+            this.video_resolution_value,
+            this.is_video_upscaled_value
+        );
+    }
+}

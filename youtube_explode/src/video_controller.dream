@@ -1,0 +1,198 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+
+internal class VideoController {
+    internal http: HttpClient;
+    internal origin: string;
+    visitor: Option<string>;
+
+    internal constructor(http: HttpClient, origin: string) {
+        this.http = http;
+        this.origin = origin;
+        this.visitor = Option.None;
+    }
+
+    internal async fun watch(
+        id: VideoId,
+        token: Option<CancellationToken>
+    ): Result<VideoWatchPage, YoutubeError> {
+        let lifetime = [this];
+        let endpoint = YoutubeHttp.endpoint(lifetime[0].origin, "/watch");
+        if endpoint.is_err() {
+            return Result.Err(endpoint.unwrap_err());
+        }
+        let url = endpoint.unwrap();
+        url.query.set("v", id.value);
+        url.query.set("bpctr", "9999999999");
+        let attempt = 0;
+        while attempt < 6 {
+            let text = YoutubeHttp.text(lifetime[0].http, HttpRequest(HttpMethod.Get, url), token)
+                .await;
+            if text.is_err() {
+                return Result.Err(text.unwrap_err());
+            }
+            let page = VideoWatchPage.parse(text.unwrap());
+            if page.is_ok() || page.unwrap_err().code() == "unavailable" {
+                return page;
+            }
+            attempt = attempt + 1;
+        }
+        return Result.Err(YoutubeError("extraction", "watch page is broken after six attempts"));
+    }
+
+    async fun visitor_data(token: Option<CancellationToken>): Result<string, YoutubeError> {
+        let lifetime = [this];
+        if lifetime[0].visitor.is_some() {
+            return Result.Ok(lifetime[0].visitor.unwrap());
+        }
+        let endpoint = YoutubeHttp.endpoint(lifetime[0].origin, "/sw.js_data");
+        if endpoint.is_err() {
+            return Result.Err(endpoint.unwrap_err());
+        }
+        let request = HttpRequest(HttpMethod.Get, endpoint.unwrap());
+        request.headers.set("Accept", "application/json");
+        request.headers.set(
+            "User-Agent",
+            "com.google.android.youtube/20.10.38 (Linux; U; ANDROID 11) gzip"
+        );
+        let result = YoutubeHttp.text(lifetime[0].http, request, token).await;
+        if result.is_err() {
+            return Result.Err(result.unwrap_err());
+        }
+        let text = result.unwrap();
+        if text.starts_with(")]}'") {
+            text = text.substring(4, text.length);
+        }
+        let parsed = Json.deserialize<JsonValue>(text);
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", "invalid visitor-data JSON"));
+        }
+        let value = parsed.unwrap();
+        for (let index in [0, 2, 0, 0, 13]) {
+            value = value.at(index).unwrap_or(JsonValue.null());
+        }
+        let visitor = value.as_string().unwrap_or("");
+        if visitor.trim().is_empty() {
+            return Result.Err(YoutubeError("extraction", "visitor data is missing"));
+        }
+        lifetime[0].visitor = Option.Some(visitor);
+        return Result.Ok(visitor);
+    }
+
+    async fun player_for(
+        id: VideoId,
+        visitor: string,
+        profile: string,
+        timestamp: Option<string>,
+        token: Option<CancellationToken>
+    ): Result<JsonValue, YoutubeError> {
+        let lifetime = [this];
+        let endpoint = YoutubeHttp.endpoint(lifetime[0].origin, "/youtubei/v1/player");
+        if endpoint.is_err() {
+            return Result.Err(endpoint.unwrap_err());
+        }
+        let client = JsonValue.dict();
+        client["visitorData"] = JsonValue.from_string(visitor);
+        client["hl"] = JsonValue.from_string("en");
+        client["gl"] = JsonValue.from_string("US");
+        client["utcOffsetMinutes"] = JsonValue.from_int(0);
+        let user_agent = "";
+        if profile == "VISIONOS" {
+            client["clientName"] = JsonValue.from_string("VISIONOS");
+            client["clientVersion"] = JsonValue.from_string("1.02");
+            client["deviceMake"] = JsonValue.from_string("Apple");
+            client["deviceModel"] = JsonValue.from_string("RealityDevice17,1");
+            client["osName"] = JsonValue.from_string("visionOS");
+            client["osVersion"] = JsonValue.from_string("26.5.23O471");
+            user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+        } else if profile == "ANDROID" {
+            client["clientName"] = JsonValue.from_string("ANDROID");
+            client["clientVersion"] = JsonValue.from_string("21.26.364");
+            client["androidSdkVersion"] = JsonValue.from_int(30);
+            client["osName"] = JsonValue.from_string("Android");
+            client["osVersion"] = JsonValue.from_string("11");
+            user_agent = "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+        } else {
+            client["clientName"] = JsonValue.from_string("TVHTML5_SIMPLY_EMBEDDED_PLAYER");
+            client["clientVersion"] = JsonValue.from_string("2.0");
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36";
+        }
+        let context = JsonValue.dict();
+        context["client"] = client;
+        let body = JsonValue.dict();
+        body["videoId"] = JsonValue.from_string(id.value);
+        body["context"] = context;
+        if timestamp.is_some() {
+            let third_party = JsonValue.dict();
+            third_party["embedUrl"] = JsonValue.from_string("https://www.youtube.com");
+            context["thirdParty"] = third_party;
+            let playback = JsonValue.dict();
+            playback["signatureTimestamp"] = JsonValue.from_string(timestamp.unwrap());
+            let playback_context = JsonValue.dict();
+            playback_context["contentPlaybackContext"] = playback;
+            body["playbackContext"] = playback_context;
+        } else {
+            body["contentCheckOk"] = JsonValue.from_bool(true);
+            body["racyCheckOk"] = JsonValue.from_bool(true);
+        }
+        let request = HttpRequest(HttpMethod.Post, endpoint.unwrap());
+        request.headers.set("User-Agent", user_agent);
+        request.headers.set("Content-Type", "application/json");
+        request.set_text(Json.serialize(body));
+        let result = YoutubeHttp.text(lifetime[0].http, request, token).await;
+        if result.is_err() {
+            return Result.Err(result.unwrap_err());
+        }
+        let parsed = Json.deserialize<JsonValue>(result.unwrap());
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", "invalid player response JSON"));
+        }
+        let response = parsed.unwrap();
+        let status = YoutubeJson.path(response, ["playabilityStatus", "status"])
+            .as_string()
+            .unwrap_or("")
+            .to_lower();
+        if status == "error" || !YoutubeJson.path(response, ["videoDetails"]).is_object() {
+            return Result.Err(YoutubeError("unavailable", "video is not available"));
+        }
+        if status != "ok" {
+            return Result.Err(
+                YoutubeError(
+                    "unplayable",
+                    YoutubeJson.path(response, ["playabilityStatus", "reason"])
+                        .as_string()
+                        .unwrap_or("video is not playable")
+                )
+            );
+        }
+        return Result.Ok(response);
+    }
+
+    internal async fun player(
+        id: VideoId,
+        timestamp: Option<string>,
+        token: Option<CancellationToken>
+    ): Result<JsonValue, YoutubeError> {
+        let lifetime = [this];
+        let visitor = lifetime[0].visitor_data(token).await;
+        if visitor.is_err() {
+            return Result.Err(visitor.unwrap_err());
+        }
+        if timestamp.is_some() {
+            return lifetime[0].player_for(id, visitor.unwrap(), "TV", timestamp, token).await;
+        }
+        let primary = lifetime[0]
+            .player_for(id, visitor.unwrap(), "VISIONOS", Option.None, token)
+            .await;
+        if primary.is_ok() {
+            return primary;
+        }
+        let error = primary.unwrap_err();
+        if error.code() != "unavailable" && error.code() != "unplayable" {
+            return Result.Err(error);
+        }
+        return lifetime[0].player_for(id, visitor.unwrap(), "ANDROID", Option.None, token).await;
+    }
+}

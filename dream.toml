@@ -1,2 +1,2 @@
 [workspace]
-members = ["semver", "markup", "sha1", "tests/markup", "tests/sha1", "tests/semver"]
+members = ["semver", "markup", "sha1", "tests/markup", "tests/sha1", "tests/semver", "youtube_explode", "tests/youtube_explode"]

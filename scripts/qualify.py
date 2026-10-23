@@ -52,7 +52,7 @@ def main():
                 if source.suffix == ".dream" and not source.read_text(encoding="utf-8").startswith(f'module {package["name"]};\n'):
                     raise SystemExit(f"Missing package module declaration: {source}")
     run([sys.executable, "scripts/generate_entities.py", "--check"])
-    run([dream, "fmt", "--check", "markup/src", "sha1/src", "semver/src", "tests"])
+    run([dream, "fmt", "--check", "markup/src", "sha1/src", "semver/src", "youtube_explode/src", "tests"])
     run([dreamer, "test"])
     run([dreamer, "test", "--release"])
     target = ROOT / "target"
@@ -60,7 +60,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="qualification-", dir=target))
     expected = {"markup": ["urn:feed\n7\nHello & welcome\n", "A & B\nif (a < b) run();\n", "A & B\n"],
                 "sha1": ["a9993e364706816aba3e25717850c26c9cd0d89d\n"],
-                "semver": ["1.2.3-beta.1+build\n1.2.3\n-1\ntrue\ntrue\ntrue\ntrue\nfalse\n"]}
+                "semver": ["1.2.3-beta.1+build\n1.2.3\n-1\ntrue\ntrue\ntrue\ntrue\nfalse\n"],
+                "youtube_explode": ["Hello & world\n"]}
     for package, outputs in expected.items():
         text = (ROOT / package / "README.md").read_text(encoding="utf-8")
         examples = [code for code in re.findall(r"```dream\n(.*?)\n```", text, re.S)
@@ -70,7 +71,7 @@ def main():
         for index, (code, output) in enumerate(zip(examples, outputs)):
             path = work / f"{package}_example_{index}.dream"
             path.write_text("module " + package + "_example;\n" + code + "\n", encoding="utf-8", newline="\n")
-            actual = run([dream, "run", path], capture=True)
+            actual = run([dream, "run", path], cwd=work, capture=True)
             if output not in actual:
                 raise SystemExit(f"Unexpected example output: {path}\n{actual}")
     registry = work / "registry"
@@ -95,8 +96,9 @@ def main():
                 '[test]\ntargets = ["native", "node"]\n')
     (consumer / "dream.toml").write_text(manifest, encoding="utf-8", newline="\n")
     (consumer / "consumer.dream").write_text(
-        'module package_consumer;\nimport system;\nimport system.testing;\nimport markup;\nimport sha1;\nimport semver;\n'
+        'module package_consumer;\nimport system;\nimport system.testing;\nimport markup;\nimport sha1;\nimport semver;\nimport youtube_explode;\n'
         '@test\nfun consumer(): void {\n'
+        '    Assert.eq(VideoId.parse("https://youtu.be/yIVRs6YSbOM").unwrap().value, "yIVRs6YSbOM");\n'
         '    Assert.eq(SemVer.parse("1.2.3").unwrap().major, 1);\n'
         '    let doc = MarkupDocument.parse_xml("<r>A &amp; B</r>").unwrap();\n'
         '    Assert.eq(doc.root.unwrap().text_content(), "A & B");\n'

@@ -1,0 +1,113 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.collections;
+
+internal static class VideoMetadata {
+    internal static fun parse(
+        id: VideoId,
+        response: JsonValue,
+        date: Option<DateTime>,
+        likes: long,
+        dislikes: long
+    ): Result<Video, YoutubeError> {
+        let details = YoutubeJson.path(response, ["videoDetails"]);
+        let status = YoutubeJson.path(response, ["playabilityStatus", "status"])
+            .as_string()
+            .unwrap_or("");
+        if status.to_lower() == "error" || !details.is_object() {
+            return Result.Err(
+                YoutubeError(
+                    "unavailable",
+                    YoutubeJson.path(response, ["playabilityStatus", "reason"])
+                        .as_string()
+                        .unwrap_or("video details are unavailable")
+                )
+            );
+        }
+        let response_id = YoutubeJson.path(details, ["videoId"]).as_string();
+        if response_id.is_some() && response_id.unwrap() != id.value {
+            return Result.Err(
+                YoutubeError(
+                    "extraction",
+                    "player response video identifier does not match the request"
+                )
+            );
+        }
+        let author = YoutubeJson.path(details, ["author"]).as_string();
+        let channel = ChannelId.parse(
+            YoutubeJson.path(details, ["channelId"]).as_string().unwrap_or("")
+        );
+        if author.is_none() || channel.is_err() {
+            return Result.Err(
+                YoutubeError("extraction", "video author/channel metadata is missing or invalid")
+            );
+        }
+        let upload = YoutubeJson.path(
+            response,
+            ["microformat", "playerMicroformatRenderer", "uploadDate"]
+        ).as_string();
+        let upload_date: Option<DateTime> = upload.is_some()
+            ? YoutubeJson.date(upload.unwrap()) : Option.None;
+        if upload_date.is_none() {
+            upload_date = date;
+        }
+        if upload_date.is_none() {
+            return Result.Err(
+                YoutubeError("extraction", "video upload date is missing or invalid")
+            );
+        }
+        let thumbnails = List<Thumbnail>();
+        let raw = YoutubeJson.path(details, ["thumbnail", "thumbnails"]);
+        let i = 0;
+        while raw.is_array() && i < raw.length {
+            let item = raw.at(i).unwrap();
+            let url = YoutubeJson.path(item, ["url"]).as_string();
+            let width = YoutubeJson.path(item, ["width"]).as_int();
+            let height = YoutubeJson.path(item, ["height"]).as_int();
+            if url.is_none()
+                || width.is_none() || height.is_none() || width.unwrap() < 0 || height.unwrap() < 0 {
+                return Result.Err(
+                    YoutubeError(
+                        "extraction",
+                        "thumbnail URL or dimensions are missing or invalid"
+                    )
+                );
+            }
+            thumbnails.push(Thumbnail(url.unwrap(), Resolution(width.unwrap(), height.unwrap())));
+            i = i + 1;
+        }
+        for (let thumbnail in Thumbnail.defaults(id)) {
+            thumbnails.push(thumbnail);
+        }
+        let keywords = List<string>();
+        let raw_keywords = YoutubeJson.path(details, ["keywords"]);
+        i = 0;
+        while raw_keywords.is_array() && i < raw_keywords.length {
+            let word = raw_keywords.at(i).unwrap().as_string();
+            if word.is_some() {
+                keywords.push(word.unwrap());
+            }
+            i = i + 1;
+        }
+        let seconds = YoutubeJson.number(YoutubeJson.path(details, ["lengthSeconds"]));
+        let duration: Option<double> = Option.None;
+        if seconds.is_some() && seconds.unwrap() >= 0.0d && seconds.unwrap() <= 9000000000000.0d {
+            duration = Option.Some(seconds.unwrap() * 1000.0d);
+        }
+        let views = YoutubeJson.integer(YoutubeJson.path(details, ["viewCount"])).unwrap_or(0L);
+        return Result.Ok(
+            Video(
+                id,
+                YoutubeJson.path(details, ["title"]).as_string().unwrap_or(""),
+                Author(channel.unwrap(), author.unwrap()),
+                upload_date.unwrap(),
+                YoutubeJson.path(details, ["shortDescription"]).as_string().unwrap_or(""),
+                duration,
+                thumbnails.take_array(),
+                keywords.take_array(),
+                Engagement(views, likes, dislikes)
+            )
+        );
+    }
+}

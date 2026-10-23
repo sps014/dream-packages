@@ -1,0 +1,80 @@
+module youtube_explode;
+import system;
+import system.net;
+
+/// Downloads and parses caption tracks using an existing HttpClient and its cookie policy.
+public class ClosedCaptionClient {
+    http: HttpClient;
+    controller: VideoController;
+
+    /// Shares a caller-owned client. Closing that client cancels pending downloads.
+    public constructor(http: HttpClient, origin: string = "https://www.youtube.com") {
+        this.http = http;
+        this.controller = VideoController(this.http, origin);
+    }
+
+    /// Fetches available caption tracks for a video using the player API and its client fallbacks.
+    /// Missing captions return an empty manifest; remote/metadata failures preserve typed errors.
+    public async fun get_manifest(
+        id: VideoId,
+        token: Option<CancellationToken> = Option.None
+    ): Result<ClosedCaptionManifest, YoutubeError> {
+        let lifetime = [this];
+        let response = lifetime[0]
+            .controller.player(id, Option.None, CancellationToken.resolve(token))
+            .await;
+        if response.is_err() {
+            return Result.Err(response.unwrap_err());
+        }
+        return ClosedCaptionManifest.from_player_response(response.unwrap());
+    }
+
+    /// Fetches srv3 XML, setting both format=3 and fmt=3 while preserving other query parameters.
+    /// HTTP/body/XML failures return YoutubeError; every received response body is closed.
+    /// Cancellation follows the supplied token or the current structured task. The text limit is 16 MiB.
+    public async fun get(
+        track: ClosedCaptionTrackInfo,
+        token: Option<CancellationToken> = Option.None
+    ): Result<ClosedCaptionTrack, YoutubeError> {
+        let lifetime = [this];
+        let effective_token = CancellationToken.resolve(token);
+        let url = Url.parse(track.url);
+        if url.is_err() {
+            return Result.Err(YoutubeError("invalid_input", "invalid caption-track URL"));
+        }
+        let target = url.unwrap();
+        target.query.set("format", "3");
+        target.query.set("fmt", "3");
+        let request = HttpRequest(HttpMethod.Get, target);
+        let sent = lifetime[0].http.send(request, effective_token).await;
+        if sent.is_err() {
+            let error = sent.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
+            );
+        }
+        let response = sent.unwrap();
+        if response.status < 200 || response.status >= 300 {
+            let status = response.status;
+            response.close();
+            return Result.Err(
+                YoutubeError(
+                    status == 429 ? "rate_limited" : "http",
+                    "caption request returned HTTP " + status.to_string()
+                )
+            );
+        }
+        let text = response.read_text(16777216, effective_token).await;
+        response.close();
+        if text.is_err() {
+            let error = text.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
+            );
+        }
+        if effective_token.is_some() && effective_token.unwrap().is_cancelled {
+            return Result.Err(YoutubeError("cancelled", "caption download cancelled"));
+        }
+        return ClosedCaptionTrack.parse_xml(text.unwrap());
+    }
+}

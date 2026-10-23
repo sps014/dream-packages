@@ -1,0 +1,136 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.collections;
+
+/// Available downloadable streams and optional DASH/HLS manifest endpoints.
+public class StreamManifest {
+    values: StreamInfo[];
+    dash: Option<string>;
+    hls: Option<string>;
+
+    /// Creates a snapshot of stream metadata and optional external manifest endpoints.
+    public constructor(
+        streams: StreamInfo[],
+        dash_manifest_url: Option<string> = Option.None,
+        hls_manifest_url: Option<string> = Option.None
+    ) {
+        this.values = streams.slice(0, streams.length);
+        this.dash = dash_manifest_url;
+        this.hls = hls_manifest_url;
+    }
+
+    /// Streams in response order; the returned array is a snapshot.
+    public get streams(): StreamInfo[] {
+        return this.values.slice(0, this.values.length);
+    }
+
+    /// External DASH XML endpoint, when advertised by the player.
+    public get dash_manifest_url(): Option<string> {
+        return this.dash;
+    }
+
+    /// External HLS playlist endpoint, when advertised by the player.
+    public get hls_manifest_url(): Option<string> {
+        return this.hls;
+    }
+
+    /// Extracts formats/adaptiveFormats, skipping SABR-only entries with no progressive URL.
+    /// Cipher-protected streams require cipher; absent sizes remain None for HTTP probing.
+    /// Invalid required format fields return extraction. Missing arrays produce an empty manifest.
+    public static fun from_player_response(
+        response: JsonValue,
+        cipher: Option<SignatureCipher> = Option.None
+    ): Result<StreamManifest, YoutubeError> {
+        let streams = List<StreamInfo>();
+        let data = YoutubeJson.path(response, ["streamingData"]);
+        for (let key in ["formats", "adaptiveFormats"]) {
+            let formats = YoutubeJson.path(data, [key]);
+            let i = 0;
+            while formats.is_array() && i < formats.length {
+                let format = formats.at(i).unwrap();
+                if StreamMetadata.has_url(format) {
+                    let parsed = StreamMetadata.parse(format, cipher);
+                    if parsed.is_err() {
+                        return Result.Err(parsed.unwrap_err());
+                    }
+                    streams.push(parsed.unwrap());
+                }
+                i = i + 1;
+            }
+        }
+        return Result.Ok(
+            StreamManifest(
+                streams.take_array(),
+                YoutubeJson.path(data, ["dashManifestUrl"]).as_string(),
+                YoutubeJson.path(data, ["hlsManifestUrl"]).as_string()
+            )
+        );
+    }
+
+    /// Extracts progressive streams from DASH XML, matching local element names across namespaces.
+    /// Skips non-media IDs, codec-less entries, and segmented sq/ initializations as upstream does.
+    /// Missing lengths remain None; malformed XML or required metadata returns extraction.
+    public static fun from_dash(source: string): Result<StreamManifest, YoutubeError> {
+        return DashManifest.parse(source);
+    }
+
+    /// Returns all streams of the exact component kind, preserving response order.
+    public fun filter(kind: StreamKind): StreamInfo[] {
+        let result = List<StreamInfo>();
+        for (let stream in this.values) {
+            if stream.kind == kind {
+                result.push(stream);
+            }
+        }
+        return result.take_array();
+    }
+
+    /// Returns the highest bitrate, optionally restricted to an exact kind.
+    /// The first wins ties; an empty selection returns None.
+    public fun highest_bitrate(kind: Option<StreamKind> = Option.None): Option<StreamInfo> {
+        let best: Option<StreamInfo> = Option.None;
+        for (let stream in this.values) {
+            if kind.is_some() && stream.kind != kind.unwrap() {
+                continue;
+            }
+            if best.is_none() || stream.bitrate > best.unwrap().bitrate {
+                best = Option.Some(stream);
+            }
+        }
+        return best;
+    }
+
+    /// Returns the highest video quality by height, frame rate, then label; first wins exact ties.
+    /// Both muxed and video-only streams participate. None when no video is present.
+    public fun highest_video_quality(): Option<StreamInfo> {
+        let best: Option<StreamInfo> = Option.None;
+        for (let stream in this.values) {
+            if stream.video_quality.is_none() {
+                continue;
+            }
+            let quality = stream.video_quality.unwrap();
+            if best.is_none() {
+                best = Option.Some(stream);
+                continue;
+            }
+            let previous = best.unwrap().video_quality.unwrap();
+            if quality.max_height > previous.max_height
+                || (
+                    quality.max_height
+                        == previous.max_height && quality.framerate > previous.framerate
+                )
+                || (
+                    quality.max_height
+                        == previous.max_height
+                        && quality.framerate
+                        == previous.framerate
+                        && quality.label.to_lower()
+                        .compare(previous.label.to_lower()) > 0
+                ) {
+                best = Option.Some(stream);
+            }
+        }
+        return best;
+    }
+}

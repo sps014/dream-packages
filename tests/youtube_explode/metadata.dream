@@ -1,0 +1,114 @@
+module youtube_explode_tests;
+import system;
+import system.json;
+import system.testing;
+import youtube_explode;
+
+fun metadata_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"playabilityStatus\": {\"status\": \"OK\"}, \"videoDetails\": {\"videoId\": \"yIVRs6YSbOM\", \"title\": \"A } \\\"title\\\" \\\\ path\", \"channelId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\", \"author\": \"Δ author\", \"lengthSeconds\": \"12.5\", \"viewCount\": \"9007199254740993\", \"shortDescription\": \"Line 1\\nLine 2 & <tag>\", \"keywords\": [\"one\", \"two\", 3], \"thumbnail\": {\"thumbnails\": [{\"url\": \"https://example.test/thumb\", \"width\": 1280, \"height\": 720}]}}, \"microformat\": {\"playerMicroformatRenderer\": {\"uploadDate\": \"2026-10-23\"}}}"
+    ).unwrap();
+}
+
+@test
+fun video_metadata_fields_and_defaults(): void {
+    let id = VideoId.parse("yIVRs6YSbOM").unwrap();
+    let json = metadata_fixture();
+    let original = Json.serialize(json);
+    let video = Video.from_player_response(id, json, like_count: 10L, dislike_count: 2L).unwrap();
+    Assert.eq(video.id, id);
+    Assert.eq(video.url, "https://www.youtube.com/watch?v=yIVRs6YSbOM");
+    Assert.eq(video.title, "A } \"title\" \\ path");
+    Assert.eq(video.author.channel_title, "Δ author");
+    Assert.eq(video.author.channel_url, "https://www.youtube.com/channel/UC3xnGqlcL3y-GXz5N3wiTJQ");
+    Assert.eq(video.upload_date.to_iso8601(), "2026-10-23T00:00:00.000Z");
+    Assert.eq(video.duration_ms.unwrap(), 12500.0d);
+    Assert.eq(video.description, "Line 1\nLine 2 & <tag>");
+    Assert.eq(video.keywords.length, 2);
+    Assert.eq(video.engagement.view_count, 9007199254740993L);
+    Assert.eq(video.engagement.like_count, 10L);
+    Assert.eq(video.engagement.dislike_count, 2L);
+    Assert.eq(video.thumbnails.length, 4);
+    Assert.eq(
+        Thumbnail.highest_resolution(video.thumbnails).unwrap().url,
+        "https://example.test/thumb"
+    );
+    Assert.eq(video.thumbnails[3].resolution.area, 172800L);
+    Assert.is_true(Thumbnail.highest_resolution([]).is_none());
+    Assert.eq(Engagement(0L, 0L, 0L).average_rating, 0.0d);
+    Assert.eq(Engagement(0L, 4L, 0L).average_rating, 5.0d);
+    Assert.eq(Json.serialize(json), original);
+    json["videoDetails"].remove("title");
+    json["videoDetails"].remove("lengthSeconds");
+    Assert.eq(Video.from_player_response(id, json).unwrap().title, "");
+    Assert.is_true(Video.from_player_response(id, json).unwrap().duration_ms.is_none());
+}
+
+@test
+fun video_metadata_missing_and_malformed_fields(): void {
+    let id = VideoId.parse("yIVRs6YSbOM").unwrap();
+    Assert.eq(Video.from_player_response(id, JsonValue.dict()).unwrap_err().code(), "unavailable");
+    let json = metadata_fixture();
+    json["videoDetails"]["videoId"] = JsonValue.from_string("Fcds0_MrgNU");
+    Assert.eq(Video.from_player_response(id, json).unwrap_err().code(), "extraction");
+    json["videoDetails"]["videoId"] = JsonValue.from_string(id.value);
+    json["videoDetails"].remove("author");
+    Assert.is_true(Video.from_player_response(id, json).is_err());
+    json["videoDetails"]["author"] = JsonValue.from_string("A");
+    json.remove("microformat");
+    Assert.is_true(Video.from_player_response(id, json).is_err());
+    let fallback = DateTime.parse("2020-01-02T03:04:05+02:00").unwrap();
+    Assert.eq(
+        Video.from_player_response(id, json, Option.Some(fallback))
+            .unwrap()
+            .upload_date.epoch_millis,
+        fallback.epoch_millis
+    );
+    json["videoDetails"]["thumbnail"]["thumbnails"] = Json.deserialize<JsonValue>(
+        "[{\"url\":\"x\"}]"
+    ).unwrap();
+    Assert.is_true(Video.from_player_response(id, json, Option.Some(fallback)).is_err());
+}
+
+@test
+fun watch_page_inline_json_and_upload_fallback(): void {
+    let id = VideoId.parse("yIVRs6YSbOM").unwrap();
+    let json = metadata_fixture();
+    json.remove("microformat");
+    let html = "<meta property=og:url content='https://youtube.com/watch?v=yIVRs6YSbOM'><meta itemprop=datePublished content='2021-02-03'><script>var ytInitialPlayerResponse = "
+        + Json.serialize(json)
+        + "; window.after={};</script><div id=player></div><script>var reactions={\"label\":\"1,234 likes\"};</script>";
+    let video = Video.from_watch_page(id, html).unwrap();
+    Assert.eq(video.title, "A } \"title\" \\ path");
+    Assert.eq(video.engagement.like_count, 1234L);
+    Assert.eq(video.upload_date.to_iso8601(), "2021-02-03T00:00:00.000Z");
+    Assert.eq(
+        Video.from_watch_page(id, "<div id=player></div>").unwrap_err().code(),
+        "unavailable"
+    );
+    Assert.eq(
+        Video.from_watch_page(id, "<meta property=og:url>").unwrap_err().code(),
+        "extraction"
+    );
+    Assert.is_true(
+        Video.from_watch_page(
+            id,
+            "<meta property=og:url><div id=player></div><script>var ytInitialPlayerResponse={broken};</script>"
+        ).is_err()
+    );
+}
+
+@test
+fun watch_page_legacy_player_config(): void {
+    let json = metadata_fixture();
+    let args = JsonValue.dict();
+    args["player_response"] = JsonValue.from_string(Json.serialize(json));
+    let config = JsonValue.dict();
+    config["args"] = args;
+    let html = "<meta property=og:url><div id=player></div><script>ytplayer.config = "
+        + Json.serialize(config) + ";</script>";
+    Assert.eq(
+        Video.from_watch_page(VideoId.parse("yIVRs6YSbOM").unwrap(), html).unwrap().description,
+        "Line 1\nLine 2 & <tag>"
+    );
+}

@@ -1,0 +1,29 @@
+module youtube_explode;
+import system;
+
+/// A reference to the channel owning a video or playlist.
+public class Author {
+    channel_id_value: ChannelId;
+    channel_title_value: string;
+
+    /// Creates a reference to the channel owning a video or playlist.
+    public constructor(channel_id: ChannelId, channel_title: string) {
+        this.channel_id_value = channel_id;
+        this.channel_title_value = channel_title;
+    }
+
+    /// Canonical channel identifier.
+    public get channel_id(): ChannelId {
+        return this.channel_id_value;
+    }
+
+    /// Channel display title, preserving Unicode.
+    public get channel_title(): string {
+        return this.channel_title_value;
+    }
+
+    /// Canonical channel URL.
+    public get channel_url(): string {
+        return "https://www.youtube.com/channel/" + this.channel_id_value.value;
+    }
+}

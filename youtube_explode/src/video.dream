@@ -1,0 +1,123 @@
+module youtube_explode;
+import system;
+import system.json;
+
+/// Metadata describing a YouTube video.
+public class Video {
+    id_value: VideoId;
+    title_value: string;
+    author_value: Author;
+    upload_date_value: DateTime;
+    description_value: string;
+    duration_ms_value: Option<double>;
+    thumbnails_value: Thumbnail[];
+    keywords_value: string[];
+    engagement_value: Engagement;
+
+    /// Creates metadata describing a YouTube video.
+    public constructor(
+        id: VideoId,
+        title: string,
+        author: Author,
+        upload_date: DateTime,
+        description: string,
+        duration_ms: Option<double>,
+        thumbnails: Thumbnail[],
+        keywords: string[],
+        engagement: Engagement
+    ) {
+        this.id_value = id;
+        this.title_value = title;
+        this.author_value = author;
+        this.upload_date_value = upload_date;
+        this.description_value = description;
+        this.duration_ms_value = duration_ms;
+        this.thumbnails_value = thumbnails;
+        this.keywords_value = keywords;
+        this.engagement_value = engagement;
+    }
+
+    /// Canonical video identifier.
+    public get id(): VideoId {
+        return this.id_value;
+    }
+
+    /// Video title; an empty title is legal.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Owning channel.
+    public get author(): Author {
+        return this.author_value;
+    }
+
+    /// Upload date, preserving any UTC offset supplied by YouTube.
+    public get upload_date(): DateTime {
+        return this.upload_date_value;
+    }
+
+    /// Video description, or empty when absent.
+    public get description(): string {
+        return this.description_value;
+    }
+
+    /// Duration in milliseconds; None when unknown, including live streams.
+    public get duration_ms(): Option<double> {
+        return this.duration_ms_value;
+    }
+
+    /// Available thumbnails, including the three upstream default images.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value;
+    }
+
+    /// Available search keywords in source order.
+    public get keywords(): string[] {
+        return this.keywords_value;
+    }
+
+    /// View/like/dislike statistics; hidden counts use zero.
+    public get engagement(): Engagement {
+        return this.engagement_value;
+    }
+
+    /// Canonical watch URL.
+    public get url(): string {
+        return "https://www.youtube.com/watch?v=" + this.id_value.value;
+    }
+
+    /// Extracts metadata from a player response, with optional upload-date and reaction counts from a watch page.
+    /// Missing author/channel/date or malformed thumbnail metadata returns extraction; ERROR/missing details returns unavailable.
+    /// A response videoId, when present, must agree with id. Input JSON is never modified.
+    public static fun from_player_response(
+        id: VideoId,
+        response: JsonValue,
+        upload_date: Option<DateTime> = Option.None,
+        like_count: long = 0L,
+        dislike_count: long = 0L
+    ): Result<Video, YoutubeError> {
+        return VideoMetadata.parse(id, response, upload_date, like_count, dislike_count);
+    }
+
+    /// Extracts a video from a watch page containing inline player JSON and #player/Open Graph metadata.
+    /// Uses page upload-date and reaction-count fallbacks. Missing inline JSON returns extraction.
+    /// This offline operation performs no network requests; VideoClient.get can use player-API fallback.
+    public static fun from_watch_page(id: VideoId, source: string): Result<Video, YoutubeError> {
+        let parsed = VideoWatchPage.parse(source);
+        if parsed.is_err() {
+            return Result.Err(parsed.unwrap_err());
+        }
+        let page = parsed.unwrap();
+        if page.response.is_none() {
+            return Result.Err(YoutubeError("extraction", "inline player response is missing"));
+        }
+        return VideoMetadata.parse(
+            id,
+            page.response.unwrap(),
+            page.upload_date,
+            page.likes,
+            page.dislikes
+        );
+    }
+}

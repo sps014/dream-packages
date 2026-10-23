@@ -1,0 +1,179 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.net;
+import system.text;
+
+internal static class StreamMetadata {
+    internal static fun parse(
+        value: JsonValue,
+        cipher: Option<SignatureCipher>
+    ): Result<StreamInfo, YoutubeError> {
+        let itag = YoutubeJson.path(value, ["itag"]).as_int();
+        let raw_url = YoutubeJson.path(value, ["url"]).as_string().unwrap_or("");
+        let cipher_data = YoutubeJson.path(value, ["cipher"]).as_string();
+        if cipher_data.is_none() {
+            cipher_data = YoutubeJson.path(value, ["signatureCipher"]).as_string();
+        }
+        let signature = "";
+        let parameter = "sig";
+        if cipher_data.is_some() {
+            let query_url = Url.parse("https://www.youtube.com/?" + cipher_data.unwrap());
+            if query_url.is_err() {
+                return Result.Err(YoutubeError("extraction", "invalid stream cipher data"));
+            }
+            let query = query_url.unwrap().query;
+            if raw_url.is_empty() {
+                raw_url = query.get("url").unwrap_or("");
+            }
+            signature = query.get("s").unwrap_or("");
+            parameter = query.get("sp").unwrap_or("sig");
+        }
+        let url = Url.parse(raw_url);
+        if itag.is_none()
+            || url.is_err() || !(url.unwrap().scheme == "http" || url.unwrap().scheme == "https") {
+            return Result.Err(
+                YoutubeError("extraction", "stream identifier or URL is missing or invalid")
+            );
+        }
+        let target = url.unwrap();
+        if !signature.is_empty() {
+            if cipher.is_none() {
+                return Result.Err(YoutubeError("extraction", "stream requires a signature cipher"));
+            }
+            let decoded = cipher.unwrap().decipher(signature);
+            if decoded.is_err() {
+                return Result.Err(decoded.unwrap_err());
+            }
+            target.query.set(parameter, decoded.unwrap());
+        }
+        let length = YoutubeJson.integer(YoutubeJson.path(value, ["contentLength"]));
+        if length.is_none() {
+            let text = target.query.get("clen");
+            if text.is_some() {
+                let parsed = long.parse(text.unwrap());
+                if parsed.is_ok() {
+                    length = Option.Some(parsed.unwrap());
+                }
+            }
+        }
+        if length.is_some() && length.unwrap() < 0L {
+            return Result.Err(YoutubeError("extraction", "negative stream content length"));
+        }
+        let bitrate = YoutubeJson.integer(YoutubeJson.path(value, ["bitrate"]));
+        let mime = YoutubeJson.path(value, ["mimeType"]).as_string().unwrap_or("");
+        let header = mime.split(';')[0].trim();
+        let slash = header.index_of('/');
+        if bitrate.is_none()
+            || bitrate.unwrap() < 0L
+            || slash.is_none()
+            || !(
+                header.to_lower().starts_with("audio/") || header.to_lower().starts_with("video/")
+            ) {
+            return Result.Err(
+                YoutubeError("extraction", "stream bitrate or MIME type is missing or invalid")
+            );
+        }
+        let container = header.substring(slash.unwrap() + 1, header.length);
+        let match = Regex.compile("codecs=\"([^\"]+)\"").unwrap().match(mime);
+        if container.is_empty() || match.length < 2 {
+            return Result.Err(YoutubeError("extraction", "stream container or codecs are missing"));
+        }
+        let codecs = match[1].split(',');
+        for (let codec in codecs) {
+            if codec.trim().is_empty() {
+                return Result.Err(YoutubeError("extraction", "empty stream codec"));
+            }
+        }
+        let audio: Option<string> = Option.None;
+        let video: Option<string> = Option.None;
+        let kind = StreamKind.VideoOnly;
+        if header.to_lower().starts_with("audio/") {
+            kind = StreamKind.AudioOnly;
+            audio = Option.Some(match[1]);
+        } else {
+            video = Option.Some(codecs[0].trim());
+            if video.unwrap().to_lower() == "unknown" {
+                video = Option.Some("av01.0.05M.08");
+            }
+            if codecs.length > 1 {
+                audio = Option.Some(codecs[1].trim());
+                kind = StreamKind.Muxed;
+            }
+        }
+        let language: Option<Language> = Option.None;
+        let audio_track = YoutubeJson.path(value, ["audioTrack"]);
+        let language_code = YoutubeJson.path(audio_track, ["id"])
+            .as_string()
+            .unwrap_or("")
+            .split('.')[0];
+        if !language_code.trim().is_empty() {
+            language = Option.Some(
+                Language(
+                    language_code,
+                    YoutubeJson.path(audio_track, ["displayName"])
+                        .as_string()
+                        .unwrap_or(language_code)
+                )
+            );
+        }
+        let quality: Option<VideoQuality> = Option.None;
+        let resolution: Option<Resolution> = Option.None;
+        if video.is_some() {
+            let fps = YoutubeJson.path(value, ["fps"]).as_int().unwrap_or(24);
+            let label = YoutubeJson.path(value, ["qualityLabel"]).as_string().unwrap_or("");
+            let parsed = label.is_empty()
+                ? VideoQuality.from_itag(itag.unwrap(), fps) : VideoQuality.parse(label, fps);
+            if parsed.is_err() {
+                return Result.Err(parsed.unwrap_err());
+            }
+            quality = Option.Some(parsed.unwrap());
+            let width = YoutubeJson.path(value, ["width"]).as_int();
+            let height = YoutubeJson.path(value, ["height"]).as_int();
+            if width.is_some() && height.is_some() {
+                if width.unwrap() <= 0 || height.unwrap() <= 0 {
+                    return Result.Err(YoutubeError("extraction", "invalid stream dimensions"));
+                }
+                resolution = Option.Some(Resolution(width.unwrap(), height.unwrap()));
+            } else {
+                resolution = Option.Some(parsed.unwrap().default_resolution());
+            }
+        }
+        let upscaled = YoutubeProtobuf.upscaled(
+            YoutubeJson.path(value, ["xtags"]).as_string().unwrap_or("")
+        );
+        return Result.Ok(
+            StreamInfo(
+                itag.unwrap(),
+                target.to_string(),
+                kind,
+                container,
+                length,
+                bitrate.unwrap(),
+                audio,
+                language,
+                YoutubeJson.path(audio_track, ["audioIsDefault"]).as_bool(),
+                video,
+                quality,
+                resolution,
+                upscaled
+            )
+        );
+    }
+
+    internal static fun has_url(value: JsonValue): bool {
+        let url = YoutubeJson.path(value, ["url"]).as_string().unwrap_or("");
+        if !url.trim().is_empty() {
+            return true;
+        }
+        let data = YoutubeJson.path(value, ["cipher"]).as_string();
+        if data.is_none() {
+            data = YoutubeJson.path(value, ["signatureCipher"]).as_string();
+        }
+        if data.is_none() {
+            return false;
+        }
+        let parsed = Url.parse("https://www.youtube.com/?" + data.unwrap());
+        return parsed.is_ok() && !parsed.unwrap().query.get("url").unwrap_or("").trim().is_empty();
+    }
+}

@@ -1,0 +1,21 @@
+module youtube_explode;
+import system;
+
+/// Metadata identifying one downloadable closed-caption track.
+public class ClosedCaptionTrackInfo {
+    /// Track URL supplied by YouTube.
+    public url: string;
+
+    /// Track language tag and display name.
+    public language: Language;
+
+    /// True for automatically generated captions.
+    public is_auto_generated: bool;
+
+    /// Creates caption-track metadata.
+    public constructor(url: string, language: Language, is_auto_generated: bool) {
+        this.url = url;
+        this.language = language;
+        this.is_auto_generated = is_auto_generated;
+    }
+}

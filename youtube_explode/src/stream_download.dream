@@ -1,0 +1,70 @@
+module youtube_explode;
+import system;
+import system.io;
+
+internal static class StreamDownload {
+    internal static async fun copy(
+        source: MediaStream,
+        destination: AsyncWriter,
+        progress: Option<fun(double): void>,
+        token: Option<CancellationToken>
+    ): Result<long, YoutubeError> {
+        let total = 0L;
+        while true {
+            let read = source.read_async(81920, token).await;
+            if read.is_err() {
+                let error = read.unwrap_err();
+                return Result.Err(
+                    YoutubeError(
+                        error.code() == "ECANCELLED" ? "cancelled" : "http",
+                        error.message()
+                    )
+                );
+            }
+            let bytes = read.unwrap();
+            if bytes.length == 0 {
+                break;
+            }
+            let offset = 0;
+            while offset < bytes.length {
+                if CancellationToken.is_cancelled_opt(token) {
+                    return Result.Err(YoutubeError("cancelled", "download cancelled"));
+                }
+                let write = destination.write_async(bytes.slice(offset, bytes.length), token).await;
+                if write.is_err() {
+                    let error = write.unwrap_err();
+                    return Result.Err(
+                        YoutubeError(
+                            error.code() == "ECANCELLED" ? "cancelled" : "io",
+                            error.message()
+                        )
+                    );
+                }
+                let count = write.unwrap();
+                if count <= 0 || count > bytes.length - offset {
+                    return Result.Err(
+                        YoutubeError("io", "destination made invalid write progress")
+                    );
+                }
+                offset = offset + count;
+                total = total + (long)count;
+                if progress.is_some() {
+                    progress.unwrap()(
+                        source.length == 0L ? 1.0d : (double)total / (double)source.length
+                    );
+                }
+            }
+        }
+        let flushed = destination.flush_async(token).await;
+        if flushed.is_err() {
+            let error = flushed.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "io", error.message())
+            );
+        }
+        if total == 0L && progress.is_some() {
+            progress.unwrap()(1.0d);
+        }
+        return Result.Ok(total);
+    }
+}

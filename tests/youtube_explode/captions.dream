@@ -1,0 +1,48 @@
+module youtube_explode_tests;
+import system;
+import system.json;
+import system.testing;
+import youtube_explode;
+
+@test
+fun caption_parsing_lookup_and_srt(): void {
+    let track = ClosedCaptionTrack.parse_xml(
+        "<tt:timedtext xmlns:tt='urn:test'><tt:body><tt:p t='1000.5' d='2300.5'><tt:s t='0'>Hello </tt:s><tt:s ac='500'>world &amp;amp;</tt:s></tt:p><tt:p t='3301' d='100'> </tt:p><tt:p t='5000' d='10'></tt:p><tt:p d='100'>missing timing</tt:p></tt:body></tt:timedtext>"
+    ).unwrap();
+    Assert.eq(track.captions.length, 2);
+    Assert.eq(track.captions[0].text, "Hello world &amp;");
+    Assert.eq(track.captions[0].parts.length, 2);
+    Assert.eq(track.captions[0].parts[1].offset_ms, 500.0d);
+    Assert.eq(track.captions[0].get_part_by_time(1.0d).unwrap().text, "world &amp;");
+    Assert.is_true(track.captions[0].get_part_by_time(501.0d).is_none());
+    Assert.is_true(track.get_by_time(1000.0d).is_none());
+    Assert.eq(track.get_by_time(3301.0d).unwrap().text, "Hello world &amp;");
+    Assert.eq(
+        track.to_srt().unwrap(),
+        "1\n00:00:01,000 --> 00:00:03,301\nHello world &amp;\n\n2\n00:00:03,301 --> 00:00:03,401\n \n\n"
+    );
+    Assert.is_true(ClosedCaptionTrack.parse_xml("<broken>").is_err());
+    let injected = ClosedCaptionTrack([ClosedCaption("x --> y", 360000000.0d, 1000.0d, [])]);
+    Assert.eq(injected.to_srt().unwrap(), "1\n100:00:00,000 --> 100:00:01,000\nx ––> y\n\n");
+    Assert.is_true(ClosedCaptionTrack([ClosedCaption("x", -1.0d, 2.0d, [])]).to_srt().is_err());
+}
+
+@test
+fun caption_manifest_language_and_errors(): void {
+    let response = Json.deserialize<JsonValue>(
+        "{\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://example.test/captions\",\"languageCode\":\"en\",\"name\":{\"runs\":[{\"text\":\"English\"}]},\"vssId\":\"a.en\"}]}}}"
+    ).unwrap();
+    let manifest = ClosedCaptionManifest.from_player_response(response).unwrap();
+    Assert.eq(manifest.tracks.length, 1);
+    Assert.is_true(manifest.get_by_language("EN").unwrap().is_auto_generated);
+    Assert.eq(manifest.get_by_language("english").unwrap().language.code, "en");
+    Assert.is_true(manifest.get_by_language("fr").is_none());
+    Assert.eq(
+        ClosedCaptionManifest.from_player_response(JsonValue.dict()).unwrap().tracks.length,
+        0
+    );
+    let malformed = Json.deserialize<JsonValue>(
+        "{\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{}]}}}"
+    ).unwrap();
+    Assert.is_true(ClosedCaptionManifest.from_player_response(malformed).is_err());
+}

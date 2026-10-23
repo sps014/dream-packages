@@ -1,0 +1,29 @@
+module youtube_explode;
+import system;
+
+/// Pixel dimensions of a thumbnail or video.
+public class Resolution {
+    width_value: int;
+    height_value: int;
+
+    /// Creates pixel dimensions of a thumbnail or video.
+    public constructor(width: int, height: int) {
+        this.width_value = width;
+        this.height_value = height;
+    }
+
+    /// Width in pixels.
+    public get width(): int {
+        return this.width_value;
+    }
+
+    /// Height in pixels.
+    public get height(): int {
+        return this.height_value;
+    }
+
+    /// Pixel area, using 64-bit arithmetic.
+    public get area(): long {
+        return (long)this.width_value * (long)this.height_value;
+    }
+}

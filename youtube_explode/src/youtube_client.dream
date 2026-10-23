@@ -1,0 +1,55 @@
+module youtube_explode;
+import system;
+import system.net;
+
+/// YouTube operations sharing one HTTP client and its cookies and connection pools.
+public class YoutubeClient {
+    http: HttpClient;
+    owns_http: bool;
+    video_client: VideoClient;
+    stream_client: StreamClient;
+    caption_client: ClosedCaptionClient;
+
+    /// Uses the supplied HTTP client or creates an owned default client when omitted.
+    /// origin selects the YouTube service or an HTTP fixture/mirror for API requests.
+    public constructor(
+        http: Option<HttpClient> = Option.None,
+        origin: string = "https://www.youtube.com"
+    ) {
+        this.owns_http = http.is_none();
+        this.http = http.is_some() ? http.unwrap() : HttpClient();
+        this.video_client = VideoClient(this.http, origin);
+        this.stream_client = StreamClient(this.http, origin);
+        this.caption_client = ClosedCaptionClient(this.http, origin);
+    }
+
+    del() {
+        if this.owns_http {
+            this.http.close();
+        }
+    }
+
+    /// Video metadata and watch-page extraction.
+    public get videos(): VideoClient {
+        return this.video_client;
+    }
+
+    /// Stream manifests, signature resolution, and seekable downloads.
+    public get streams(): StreamClient {
+        return this.stream_client;
+    }
+
+    /// Caption manifests, track retrieval, and SRT generation.
+    public get closed_captions(): ClosedCaptionClient {
+        return this.caption_client;
+    }
+
+    /// Closes an owned default HTTP client; caller-supplied clients remain open.
+    /// Safe to call repeatedly. Closing cancels pending requests on the owned client.
+    public fun close(): Result<Unit, HttpError> {
+        if this.owns_http {
+            return this.http.close();
+        }
+        return Result.Ok(Unit());
+    }
+}
