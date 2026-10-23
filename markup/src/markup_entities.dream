@@ -1,0 +1,214 @@
+module markup;
+import system;
+import system.collections;
+import system.text;
+
+internal class MarkupEntities {
+    html: bool;
+    names: Option<Map<string, string>>;
+
+    internal constructor(html: bool) {
+        this.html = html;
+        this.names = Option.None;
+    }
+
+    fun named(name: string): Option<string> {
+        if this.names.is_none() {
+            let table = Map<string, string>();
+            for (let row in HtmlEntityData.table().split("\n")) {
+                let equal = row.index_of('=');
+                if equal.is_some() {
+                    table[row.substring(0, equal.unwrap())] = row.substring(
+                        equal.unwrap() + 1,
+                        row.length
+                    );
+                }
+            }
+            this.names = Option.Some(table);
+        }
+        return this.names.unwrap().get(name);
+    }
+
+    internal static fun append(out: StringBuilder, cp: int): void {
+        if cp >= 65536 {
+            out.append_char((char)(55296 + ((cp - 65536) >> 10)));
+            out.append_char((char)(56320 + ((cp - 65536) & 1023)));
+        } else {
+            out.append_char((char)cp);
+        }
+    }
+
+    static fun digit(c: char, radix: int): int {
+        if c >= '0' && c <= '9' {
+            return (int)c - 48;
+        }
+        let low = c.to_lower();
+        if radix == 16 && low >= 'a' && low <= 'f' {
+            return (int)low - 87;
+        }
+        return 0 - 1;
+    }
+
+    static fun html_scalar(cp: int): int {
+        if cp <= 0 || cp > 1114111 || (cp >= 55296 && cp <= 57343) {
+            return 65533;
+        }
+        if cp >= 128 && cp <= 159 {
+            let replacements = [
+                8364,
+                129,
+                8218,
+                402,
+                8222,
+                8230,
+                8224,
+                8225,
+                710,
+                8240,
+                352,
+                8249,
+                338,
+                141,
+                381,
+                143,
+                144,
+                8216,
+                8217,
+                8220,
+                8221,
+                8226,
+                8211,
+                8212,
+                732,
+                8482,
+                353,
+                8250,
+                339,
+                157,
+                382,
+                376
+            ];
+            return replacements[cp - 128];
+        }
+        return cp;
+    }
+
+    internal fun decode(source: string, offset: int, attribute: bool): Result<string, MarkupError> {
+        let out = StringBuilder();
+        let i = 0;
+        while i < source.length {
+            if source[i] != '&' {
+                out.append_char(source[i]);
+                i = i + 1;
+                continue;
+            }
+            let start = i;
+            let j = i + 1;
+            if j < source.length && source[j] == '#' {
+                j = j + 1;
+                let radix = 10;
+                if j < source.length && (source[j] == 'x' || (this.html && source[j] == 'X')) {
+                    radix = 16;
+                    j = j + 1;
+                }
+                let digits = j;
+                let cp = 0;
+                while j < source.length {
+                    let digit = MarkupEntities.digit(source[j], radix);
+                    if digit < 0 {
+                        break;
+                    }
+                    if cp <= 1114111 {
+                        cp = cp * radix + digit;
+                    }
+                    j = j + 1;
+                }
+                if j == digits {
+                    if !this.html {
+                        return Result.Err(
+                            MarkupError(offset + start, "invalid numeric character reference")
+                        );
+                    }
+                    out.append_char('&');
+                    i = i + 1;
+                    continue;
+                }
+                let terminated = j < source.length && source[j] == ';';
+                if !this.html && (!terminated || !MarkupXml.scalar(cp)) {
+                    return Result.Err(
+                        MarkupError(offset + start, "invalid XML character reference")
+                    );
+                }
+                if terminated {
+                    j = j + 1;
+                }
+                if this.html {
+                    cp = MarkupEntities.html_scalar(cp);
+                }
+                MarkupEntities.append(out, cp);
+                i = j;
+                continue;
+            }
+            while j < source.length
+                && j - start <= 32 && (source[j].is_alpha() || source[j].is_digit()) {
+                j = j + 1;
+            }
+            if j < source.length && source[j] == ';' {
+                j = j + 1;
+            }
+            if !this.html {
+                let name = source.substring(start + 1, j);
+                let value = "";
+                if name == "amp;" {
+                    value = "&";
+                } else if name == "lt;" {
+                    value = "<";
+                } else if name == "gt;" {
+                    value = ">";
+                } else if name == "quot;" {
+                    value = "\"";
+                } else if name == "apos;" {
+                    value = "'";
+                } else {
+                    return Result.Err(
+                        MarkupError(offset + start, "unknown or unterminated XML entity")
+                    );
+                }
+                out.append(value);
+                i = j;
+                continue;
+            }
+            let end = j;
+            let matched = false;
+            while end > start + 1 {
+                let name = source.substring(start + 1, end);
+                let value = this.named(name);
+                if value.is_some() {
+                    let ambiguous = !name.ends_with(";")
+                        && attribute
+                        && end < source.length
+                        && (source[end].is_alpha() || source[end].is_digit() || source[end] == '=');
+                    if ambiguous {
+                        break;
+                    }
+                    for (let encoded in value.unwrap().split(",")) {
+                        let cp = 0;
+                        for (let c in encoded) {
+                            cp = cp * 16 + MarkupEntities.digit(c, 16);
+                        }
+                        MarkupEntities.append(out, cp);
+                    }
+                    i = end;
+                    matched = true;
+                    break;
+                }
+                end = end - 1;
+            }
+            if !matched {
+                out.append_char('&');
+                i = i + 1;
+            }
+        }
+        return Result.Ok(out.to_string());
+    }
+}

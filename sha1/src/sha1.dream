@@ -1,0 +1,87 @@
+module sha1;
+import system;
+
+/// SHA-1 for interoperability with existing protocols. Do not use for new security designs.
+public static class Sha1 {
+    static fun rotate(value: uint, bits: uint): uint {
+        return (value << bits) | (value >>(32u - bits));
+    }
+
+    /// Returns the 20-byte SHA-1 digest of data, using bounded working memory.
+    /// The input is borrowed and never modified. Padding length uses 64-bit arithmetic.
+    public static fun hash(borrow data: byte[]): byte[] {
+        let h = [0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u];
+        let words = Array.alloc<uint>(80);
+        let total = (((long)data.length + 72L) / 64L) * 64L;
+        let bits = (ulong)data.length * 8uL;
+        let block = 0L;
+        while block < total {
+            let t = 0;
+            while t < 16 {
+                let word = 0u;
+                let j = 0;
+                while j < 4 {
+                    let at = block + (long)(t * 4 + j);
+                    let value = 0u;
+                    if at < (long)data.length {
+                        value = (uint)data[(int)at];
+                    } else if at == (long)data.length {
+                        value = 128u;
+                    } else if at >= total - 8L {
+                        value = (uint)(bits >>(ulong)((total - 1L - at) * 8L)) & 255u;
+                    }
+                    word = (word << 8u) | value;
+                    j = j + 1;
+                }
+                words[t] = word;
+                t = t + 1;
+            }
+            while t < 80 {
+                words[t] = Sha1.rotate(
+                    words[t - 3] ^ words[t - 8] ^ words[t - 14] ^ words[t - 16],
+                    1u
+                );
+                t = t + 1;
+            }
+            let a = h[0];
+            let b = h[1];
+            let c = h[2];
+            let d = h[3];
+            let e = h[4];
+            t = 0;
+            while t < 80 {
+                let f = b ^ c ^ d;
+                let k = 0xCA62C1D6u;
+                if t < 20 {
+                    f = (b & c) | (~b & d);
+                    k = 0x5A827999u;
+                } else if t < 40 {
+                    k = 0x6ED9EBA1u;
+                } else if t < 60 {
+                    f = (b & c) | (b & d) | (c & d);
+                    k = 0x8F1BBCDCu;
+                }
+                let next = Sha1.rotate(a, 5u) + f + e + k + words[t];
+                e = d;
+                d = c;
+                c = Sha1.rotate(b, 30u);
+                b = a;
+                a = next;
+                t = t + 1;
+            }
+            h[0] = h[0] + a;
+            h[1] = h[1] + b;
+            h[2] = h[2] + c;
+            h[3] = h[3] + d;
+            h[4] = h[4] + e;
+            block = block + 64L;
+        }
+        let result = Array.alloc<byte>(20);
+        let i = 0;
+        while i < 20 {
+            result[i] = (byte)(h[i / 4] >>(uint)((3 - i % 4) * 8));
+            i = i + 1;
+        }
+        return result;
+    }
+}

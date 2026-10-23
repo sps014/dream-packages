@@ -1,0 +1,142 @@
+import system;
+import system.testing;
+import sha1;
+
+@test
+fun known_vectors(): void {
+    Assert.eq(Encoding.hex_encode(Sha1.hash([])), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+    Assert.eq(
+        Encoding.hex_encode(Sha1.hash(Encoding.utf8_encode("abc"))),
+        "a9993e364706816aba3e25717850c26c9cd0d89d"
+    );
+    let million = Array.alloc<byte>(1000000);
+    let i = 0;
+    while i < million.length {
+        million[i] = (byte)97;
+        i = i + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(million)), "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
+}
+
+@test
+fun padding_and_binary_vectors(): void {
+    let data1 = Array.alloc<byte>(1);
+    let i1 = 0;
+    while i1 < 1 {
+        data1[i1] = (byte)((i1 * 37 + 11) % 256);
+        i1 = i1 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data1)), "067d5096f219c64b53bb1c7d5e3754285b565a47");
+    let data7 = Array.alloc<byte>(7);
+    let i7 = 0;
+    while i7 < 7 {
+        data7[i7] = (byte)((i7 * 37 + 11) % 256);
+        i7 = i7 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data7)), "fa39e4b946d2fee587051a87d47d68a5590f64b9");
+    let data54 = Array.alloc<byte>(54);
+    let i54 = 0;
+    while i54 < 54 {
+        data54[i54] = (byte)((i54 * 37 + 11) % 256);
+        i54 = i54 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data54)), "e5d956aa039fb09be02efb91ee8646e55fccaf14");
+    let data55 = Array.alloc<byte>(55);
+    let i55 = 0;
+    while i55 < 55 {
+        data55[i55] = (byte)((i55 * 37 + 11) % 256);
+        i55 = i55 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data55)), "c4622048cfef59b72875839ee7ae1cbcf55e7658");
+    let data56 = Array.alloc<byte>(56);
+    let i56 = 0;
+    while i56 < 56 {
+        data56[i56] = (byte)((i56 * 37 + 11) % 256);
+        i56 = i56 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data56)), "ddc12942656468475970fa4fa49161f52ed138e4");
+    let data57 = Array.alloc<byte>(57);
+    let i57 = 0;
+    while i57 < 57 {
+        data57[i57] = (byte)((i57 * 37 + 11) % 256);
+        i57 = i57 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data57)), "c3299df7d6a56509d38a55d09ccf403d4a56d044");
+    let data63 = Array.alloc<byte>(63);
+    let i63 = 0;
+    while i63 < 63 {
+        data63[i63] = (byte)((i63 * 37 + 11) % 256);
+        i63 = i63 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data63)), "7f8c3fa49f1297bd8b9feb964b6b419987f9f0d1");
+    let data64 = Array.alloc<byte>(64);
+    let i64 = 0;
+    while i64 < 64 {
+        data64[i64] = (byte)((i64 * 37 + 11) % 256);
+        i64 = i64 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data64)), "a334b47180c61fd522f99905ec02c36f9e848211");
+    let data65 = Array.alloc<byte>(65);
+    let i65 = 0;
+    while i65 < 65 {
+        data65[i65] = (byte)((i65 * 37 + 11) % 256);
+        i65 = i65 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data65)), "dd27d9eb923d39687e10872c3e8133ba2f0a68a1");
+    let data119 = Array.alloc<byte>(119);
+    let i119 = 0;
+    while i119 < 119 {
+        data119[i119] = (byte)((i119 * 37 + 11) % 256);
+        i119 = i119 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data119)), "bea949473b1ec34747ce121c3293624b5d9d8f84");
+    let data120 = Array.alloc<byte>(120);
+    let i120 = 0;
+    while i120 < 120 {
+        data120[i120] = (byte)((i120 * 37 + 11) % 256);
+        i120 = i120 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data120)), "bf05266acd3ec21592b4d42aaea97fa6f3e51926");
+    let data127 = Array.alloc<byte>(127);
+    let i127 = 0;
+    while i127 < 127 {
+        data127[i127] = (byte)((i127 * 37 + 11) % 256);
+        i127 = i127 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data127)), "b2b4bfd7b2112a167b77a600cca227593523c406");
+    let data128 = Array.alloc<byte>(128);
+    let i128 = 0;
+    while i128 < 128 {
+        data128[i128] = (byte)((i128 * 37 + 11) % 256);
+        i128 = i128 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data128)), "3b1953091899492377f686c266b81d84b5d40f70");
+    let data129 = Array.alloc<byte>(129);
+    let i129 = 0;
+    while i129 < 129 {
+        data129[i129] = (byte)((i129 * 37 + 11) % 256);
+        i129 = i129 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data129)), "4fd6558b2a93925fb7129447e1d1fac8cff56287");
+    let data255 = Array.alloc<byte>(255);
+    let i255 = 0;
+    while i255 < 255 {
+        data255[i255] = (byte)((i255 * 37 + 11) % 256);
+        i255 = i255 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data255)), "76ec145943a27a1334b84aeb3a9e44cd20d8c5c4");
+    let data256 = Array.alloc<byte>(256);
+    let i256 = 0;
+    while i256 < 256 {
+        data256[i256] = (byte)((i256 * 37 + 11) % 256);
+        i256 = i256 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data256)), "4a9c5b9e5e368da9991013119fb90628b1c1f319");
+    let data1024 = Array.alloc<byte>(1024);
+    let i1024 = 0;
+    while i1024 < 1024 {
+        data1024[i1024] = (byte)((i1024 * 37 + 11) % 256);
+        i1024 = i1024 + 1;
+    }
+    Assert.eq(Encoding.hex_encode(Sha1.hash(data1024)), "3d43695d5e945cea897d489cff9ff45bb019498b");
+}

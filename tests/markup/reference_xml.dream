@@ -1,0 +1,207 @@
+import system.testing;
+import markup;
+
+// Expected text is computed with Python's independent XML parser.
+@test
+fun reference_xml_documents(): void {
+    let d0 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"© &amp;copy;\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d0.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d0.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d1 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"© &amp;copy;\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d1.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d1.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d2 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"a&lt;&amp;&#x27;&quot;b\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d2.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d2.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d3 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\" café \">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d3.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d3.elements("a")[0].attribute("id").unwrap(), " café ");
+    let d4 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"a&lt;&amp;&#x27;&quot;b\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d4.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d4.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d5 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"© &amp;copy;\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d5.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d5.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d6 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\" café \"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d6.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d6.elements("a")[0].attribute("id").unwrap(), " café ");
+    let d7 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\" café \">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d7.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d7.elements("a")[0].attribute("id").unwrap(), " café ");
+    let d8 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"a&lt;&amp;&#x27;&quot;b\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d8.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d8.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d9 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\" café \">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d9.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d9.elements("a")[0].attribute("id").unwrap(), " café ");
+    let d10 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"© &amp;copy;\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d10.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d10.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d11 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"line\nnext\tend\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d11.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d11.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d12 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"© &amp;copy;\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d12.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d12.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d13 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d13.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d13.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d14 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"a&lt;&amp;&#x27;&quot;b\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d14.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d14.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d15 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"© &amp;copy;\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d15.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d15.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d16 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"© &amp;copy;\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d16.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d16.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d17 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"a&lt;&amp;&#x27;&quot;b\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d17.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d17.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d18 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"a&lt;&amp;&#x27;&quot;b\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d18.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d18.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d19 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d19.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d19.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d20 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"© &amp;copy;\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d20.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d20.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d21 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"a&lt;&amp;&#x27;&quot;b\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d21.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d21.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d22 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d22.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d22.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d23 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"日本 😀\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d23.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d23.elements("a")[0].attribute("id").unwrap(), "日本 😀");
+    let d24 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"a&lt;&amp;&#x27;&quot;b\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d24.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d24.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d25 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d25.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d25.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d26 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"© &amp;copy;\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d26.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d26.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d27 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"© &amp;copy;\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d27.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d27.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d28 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d28.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d28.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d29 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"日本 😀\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d29.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d29.elements("a")[0].attribute("id").unwrap(), "日本 😀");
+    let d30 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"日本 😀\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d30.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d30.elements("a")[0].attribute("id").unwrap(), "日本 😀");
+    let d31 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"line\nnext\tend\">© &amp;copy;</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d31.root.unwrap().text_content(), "© &copy;<raw>");
+    Assert.eq(d31.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d32 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"a&lt;&amp;&#x27;&quot;b\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d32.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d32.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d33 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\" café \">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d33.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d33.elements("a")[0].attribute("id").unwrap(), " café ");
+    let d34 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"© &amp;copy;\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d34.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d34.elements("a")[0].attribute("id").unwrap(), "© &copy;");
+    let d35 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"line\nnext\tend\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d35.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d35.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d36 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"a&lt;&amp;&#x27;&quot;b\"> café </a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d36.root.unwrap().text_content(), " café <raw>");
+    Assert.eq(d36.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+    let d37 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:1\"><a id=\"日本 😀\">line\nnext\tend</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d37.root.unwrap().text_content(), "line\nnext\tend<raw>");
+    Assert.eq(d37.elements("a")[0].attribute("id").unwrap(), "日本 😀");
+    let d38 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:2\"><a id=\"line\nnext\tend\">a&lt;&amp;&#x27;&quot;b</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d38.root.unwrap().text_content(), "a<&'\"b<raw>");
+    Assert.eq(d38.elements("a")[0].attribute("id").unwrap(), "line next end");
+    let d39 = MarkupDocument.parse_xml(
+        "<r xmlns=\"urn:0\"><a id=\"a&lt;&amp;&#x27;&quot;b\">日本 😀</a><!-- comment --><b><![CDATA[<raw>]]></b></r>"
+    ).unwrap();
+    Assert.eq(d39.root.unwrap().text_content(), "日本 😀<raw>");
+    Assert.eq(d39.elements("a")[0].attribute("id").unwrap(), "a<&'\"b");
+}

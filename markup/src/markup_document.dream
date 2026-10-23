@@ -1,0 +1,55 @@
+module markup;
+import system;
+
+/// Parsed XML or an HTML fragment/document, with source-ordered nodes.
+public class MarkupDocument {
+    internal container: MarkupNode;
+
+    internal constructor(container: MarkupNode) {
+        this.container = container;
+    }
+
+    /// Parses XML 1.0 without DTDs or external resources. Requires one root and valid namespaces.
+    /// Limits count UTF-16 input units, nodes plus attributes, and element depth (1..512).
+    public static fun parse_xml(
+        source: string,
+        max_chars: int = 16777216,
+        max_nodes: int = 100000,
+        max_depth: int = 128
+    ): Result<MarkupDocument, MarkupError> {
+        return MarkupParser.parse(source, false, max_chars, max_nodes, max_depth);
+    }
+
+    /// Parses HTML with case folding, void elements, optional end tags, raw script/style text,
+    /// and HTML named/numeric entities. Returns errors for resource limits, not recoverable syntax.
+    /// Limits count UTF-16 units, nodes plus attributes, and element depth (1..512).
+    /// This is a scraping tree, not a browser HTML5 tree builder; it adds no html/body/table wrappers.
+    public static fun parse_html(
+        source: string,
+        max_chars: int = 16777216,
+        max_nodes: int = 100000,
+        max_depth: int = 128
+    ): Result<MarkupDocument, MarkupError> {
+        return MarkupParser.parse(source, true, max_chars, max_nodes, max_depth);
+    }
+
+    /// Top-level nodes in source order, including comments and processing instructions.
+    public get nodes(): MarkupNode[] {
+        return this.container.children;
+    }
+
+    /// The first top-level element, or None for an HTML fragment containing only text.
+    public get root(): Option<MarkupNode> {
+        for (let node in this.container.items) {
+            if node.kind == MarkupKind.Element {
+                return Option.Some(node);
+            }
+        }
+        return Option.None;
+    }
+
+    /// Finds all elements by qualified name, or all elements when name is empty.
+    public fun elements(name: string = ""): MarkupNode[] {
+        return this.container.descendants(name);
+    }
+}

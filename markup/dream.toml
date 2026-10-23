@@ -1,0 +1,9 @@
+[package]
+name = "markup"
+version = "0.1.0"
+type = "lib"
+edition = "2026"
+authors = ["Shivendra Pratap Singh <shivendrapsingh014@gmail.com>"]
+description = "HTML and namespace-aware XML parsing in pure Dream"
+license = "MIT AND PSF-2.0"
+keywords = ["html", "xml", "parser"]

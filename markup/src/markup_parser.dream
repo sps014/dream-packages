@@ -1,0 +1,297 @@
+module markup;
+import system;
+import system.collections;
+import system.text;
+
+internal class MarkupParser {
+    internal source: string;
+    internal html: bool;
+    internal position: int;
+    internal stack: List<MarkupNode>;
+    internal root: MarkupNode;
+    internal error: Option<MarkupError>;
+    internal entities: MarkupEntities;
+    internal count: int;
+    internal max_nodes: int;
+    internal max_depth: int;
+    internal roots: int;
+
+    internal constructor(source: string, html: bool, max_nodes: int, max_depth: int) {
+        this.source = source;
+        this.html = html;
+        this.position = 0;
+        this.root = MarkupNode(MarkupKind.Document, "", "", html);
+        this.root.namespaces["xml"] = "http://www.w3.org/XML/1998/namespace";
+        this.stack = List<MarkupNode>();
+        this.stack.push(this.root);
+        this.error = Option.None;
+        this.entities = MarkupEntities(html);
+        this.count = 0;
+        this.max_nodes = max_nodes;
+        this.max_depth = max_depth;
+        this.roots = 0;
+    }
+
+    internal static fun parse(
+        source: string,
+        html: bool,
+        max_chars: int,
+        max_nodes: int,
+        max_depth: int
+    ): Result<MarkupDocument, MarkupError> {
+        if max_chars < 0 || max_nodes < 1 || max_depth < 1 || max_depth > 512 {
+            return Result.Err(
+                MarkupError(0, "invalid limits: depth must be 1..512 and node limit positive")
+            );
+        }
+        if source.length > max_chars {
+            return Result.Err(MarkupError(0, "input limit exceeded"));
+        }
+        let normalized = source.replace("\r\n", "\n").replace("\r", "\n");
+        if html {
+            normalized = normalized.replace(((char)0).as_string(), "�");
+        }
+        let parser = MarkupParser(normalized, html, max_nodes, max_depth);
+        if !html {
+            MarkupXml.validate_characters(parser);
+        }
+        if parser.source.length > 0 && (int)parser.source[0] == 65279 {
+            parser.position = 1;
+        }
+        while parser.position < parser.source.length && parser.error.is_none() {
+            let before = parser.position;
+            if parser.html && parser.stack.length > 1 && MarkupTags.raw_name(parser.current().name) {
+                parser.raw_text();
+            } else if parser.at("<!--") {
+                parser.delimited("<!--", "-->", MarkupKind.Comment);
+            } else if parser.at("<![CDATA[") && !parser.html {
+                if parser.stack.length == 1 {
+                    parser.fail("CDATA requires an element");
+                } else {
+                    parser.delimited("<![CDATA[", "]]>", MarkupKind.Text);
+                }
+            } else if parser.at("<?") && !parser.html {
+                parser.instruction();
+            } else if parser.at("</") {
+                MarkupTags.close(parser);
+            } else if parser.at("<!") || (parser.html && parser.at("<?")) {
+                if !parser.html {
+                    parser.fail("DTDs and declarations are not supported");
+                } else {
+                    parser.skip_declaration();
+                }
+            } else if parser.at("<") {
+                MarkupTags.open(parser);
+            } else {
+                parser.text();
+            }
+            if parser.position <= before && parser.error.is_none() {
+                parser.fail("parser made no progress");
+            }
+        }
+        if parser.error.is_some() {
+            return Result.Err(parser.error.unwrap());
+        }
+        if !html && (parser.stack.length != 1 || parser.roots != 1) {
+            return Result.Err(
+                MarkupError(parser.position, "XML requires exactly one complete root element")
+            );
+        }
+        return Result.Ok(MarkupDocument(parser.root));
+    }
+
+    internal fun current(): MarkupNode {
+        return this.stack[this.stack.length - 1];
+    }
+
+    internal fun fail(message: string): void {
+        if this.error.is_none() {
+            this.error = Option.Some(MarkupError(this.position, message));
+        }
+    }
+
+    internal fun at(text: string): bool {
+        return this.at_index(text, this.position, false);
+    }
+
+    internal fun at_index(text: string, index: int, fold: bool): bool {
+        if index < 0 || index + text.length > this.source.length {
+            return false;
+        }
+        let i = 0;
+        while i < text.length {
+            let c = this.source[index + i];
+            if fold {
+                c = c.to_lower();
+            }
+            if c != text[i] {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    internal fun find(text: string, start: int, fold: bool = false): int {
+        let i = start;
+        while i + text.length <= this.source.length {
+            if this.at_index(text, i, fold) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return 0 - 1;
+    }
+
+    internal static fun space(c: char): bool {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == (char)12;
+    }
+
+    internal fun whitespace(): void {
+        while this.position < this.source.length && MarkupParser.space(this.source[this.position]) {
+            this.position = this.position + 1;
+        }
+    }
+
+    internal fun append(node: MarkupNode): void {
+        if this.count >= this.max_nodes {
+            this.fail("node limit exceeded");
+            return;
+        }
+        this.count = this.count + 1;
+        this.current().items.push(node);
+    }
+
+    internal fun decode(text: string, offset: int, attribute: bool = false): string {
+        let decoded = this.entities.decode(text, offset, attribute);
+        if decoded.is_err() {
+            this.error = Option.Some(decoded.unwrap_err());
+            return "";
+        }
+        return decoded.unwrap();
+    }
+
+    fun text(): void {
+        let start = this.position;
+        while this.position < this.source.length && this.source[this.position] != '<' {
+            this.position = this.position + 1;
+        }
+        let raw = this.source.substring(start, this.position);
+        if !this.html && raw.contains("]]>") {
+            this.fail("unexpected CDATA closing delimiter");
+            return;
+        }
+        let value = this.decode(raw, start);
+        if !this.html && this.stack.length == 1 && value.trim() != "" {
+            this.fail("text outside XML root");
+            return;
+        }
+        if value != "" {
+            this.append(MarkupNode(MarkupKind.Text, "", value, this.html));
+        }
+    }
+
+    fun delimited(open: string, close: string, kind: MarkupKind): void {
+        let start = this.position + open.length;
+        let end = this.find(close, start);
+        if end < 0 {
+            if !this.html {
+                this.fail("unterminated comment or CDATA");
+                return;
+            }
+            end = this.source.length;
+        }
+        let value = this.source.substring(start, end);
+        if !this.html
+            && kind == MarkupKind.Comment && (value.contains("--") || value.ends_with("-")) {
+            this.fail("invalid XML comment");
+            return;
+        }
+        this.position = end;
+        if end < this.source.length {
+            this.position = end + close.length;
+        }
+        this.append(MarkupNode(kind, "", value, this.html));
+    }
+
+    fun instruction(): void {
+        let start = this.position;
+        let end = this.find("?>", start + 2);
+        if end < 0 {
+            this.fail("unterminated processing instruction");
+            return;
+        }
+        this.position = start + 2;
+        let name = MarkupTags.name(this);
+        let text_start = this.position;
+        if !MarkupXml.valid_name(name, false)
+            || (text_start < end && !MarkupParser.space(this.source[text_start])) {
+            this.fail("invalid processing instruction");
+            return;
+        }
+        let value = this.source.substring(text_start, end).trim();
+        if name.to_lower() == "xml" {
+            if name != "xml" || (start != 0 && !(start == 1 && (int)this.source[0] == 65279)) {
+                this.fail("XML declaration must be first");
+                return;
+            }
+            if !MarkupXml.declaration(value) {
+                this.fail("invalid XML declaration");
+                return;
+            }
+        } else {
+            this.append(MarkupNode(MarkupKind.ProcessingInstruction, name, value, false));
+        }
+        this.position = end + 2;
+    }
+
+    fun skip_declaration(): void {
+        let quote = (char)0;
+        this.position = this.position + 2;
+        while this.position < this.source.length {
+            let c = this.source[this.position];
+            this.position = this.position + 1;
+            if quote != (char)0 {
+                if c == quote {
+                    quote = (char)0;
+                }
+            } else if c == (char)39 || c == '"' {
+                quote = c;
+            } else if c == '>' {
+                return;
+            }
+        }
+    }
+
+    fun raw_text(): void {
+        let name = this.current().name;
+        let marker = "</" + name;
+        let start = this.position;
+        let end = this.find(marker, start, true);
+        while end >= 0 {
+            let after = end + marker.length;
+            if after
+                == this.source.length
+                || this.source[after]
+                == '>' || this.source[after] == '/' || MarkupParser.space(this.source[after]) {
+                break;
+            }
+            end = this.find(marker, end + 1, true);
+        }
+        if end == start {
+            MarkupTags.close(this);
+            return;
+        }
+        if end < 0 {
+            end = this.source.length;
+        }
+        let value = this.source.substring(start, end);
+        if name == "textarea" || name == "title" {
+            value = this.decode(value, start);
+        }
+        this.position = end;
+        if value != "" {
+            this.append(MarkupNode(MarkupKind.Text, "", value, true));
+        }
+    }
+}

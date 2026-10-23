@@ -1,0 +1,10 @@
+[package]
+name = "sha1_tests"
+version = "0.1.0"
+type = "test"
+
+[dependencies]
+sha1 = { path = "../../sha1" }
+
+[test]
+targets = ["native", "node"]

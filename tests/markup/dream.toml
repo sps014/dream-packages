@@ -1,0 +1,10 @@
+[package]
+name = "markup_tests"
+version = "0.1.0"
+type = "test"
+
+[dependencies]
+markup = { path = "../../markup" }
+
+[test]
+targets = ["native", "node"]

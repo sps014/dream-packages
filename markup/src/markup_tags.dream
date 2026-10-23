@@ -1,0 +1,268 @@
+module markup;
+import system;
+import system.collections;
+import system.text;
+
+internal static class MarkupTags {
+    internal static fun name(p: MarkupParser): string {
+        let start = p.position;
+        while p.position < p.source.length {
+            let c = p.source[p.position];
+            if MarkupParser.space(c)
+                || c
+                == '/' || c == '>' || c == '=' || c == '<' || c == '?' || c == '"' || c == (char)39 {
+                break;
+            }
+            p.position = p.position + 1;
+        }
+        return p.source.substring(start, p.position);
+    }
+
+    internal static fun raw_name(name: string): bool {
+        return name
+            == "script"
+            || name
+            == "style"
+            || name
+            == "textarea"
+            || name
+            == "title"
+            || name == "xmp" || name == "iframe" || name == "noembed" || name == "noframes";
+    }
+
+    static fun void_name(name: string): bool {
+        return ("|area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr|")
+            .contains("|" + name + "|");
+    }
+
+    static fun implied(p: MarkupParser, incoming: string): void {
+        let block = (
+            "|address|article|aside|blockquote|div|dl|fieldset|footer|form|h1|h2|h3|h4|h5|h6|header|hr|main|nav|ol|p|pre|section|table|ul|"
+        ).contains("|" + incoming + "|");
+        let i = p.stack.length - 1;
+        while i > 0 {
+            let current = p.stack[i].name;
+            let close = (current == "p" && block)
+                || (incoming == "li" && current == "li")
+                || (
+                    (incoming == "dt" || incoming == "dd") && (current == "dt" || current == "dd")
+                )
+                || (
+                    (incoming == "td" || incoming == "th") && (current == "td" || current == "th")
+                )
+                || (incoming == "tr" && current == "tr")
+                || (incoming == "option" && current == "option");
+            if close {
+                while p.stack.length > i {
+                    p.stack.pop();
+                }
+                return;
+            }
+            if current == "table" || current == "ul" || current == "ol" || current == "dl" {
+                return;
+            }
+            i = i - 1;
+        }
+    }
+
+    internal static fun open(p: MarkupParser): void {
+        let start = p.position;
+        p.position = p.position + 1;
+        if p.html && (p.position >= p.source.length || !p.source[p.position].is_alpha()) {
+            p.append(MarkupNode(MarkupKind.Text, "", "<", true));
+            return;
+        }
+        let tag = MarkupTags.name(p);
+        if tag == "" {
+            p.fail("expected element name");
+            return;
+        }
+        if p.html {
+            tag = tag.to_lower();
+            MarkupTags.implied(p, tag);
+        } else if !MarkupXml.valid_name(tag) {
+            p.fail("invalid element name");
+            return;
+        }
+        let node = MarkupNode(MarkupKind.Element, tag, "", p.html);
+        let seen = Map<string, bool>();
+        let self_closing = false;
+        let finished = false;
+        while p.position < p.source.length && p.error.is_none() {
+            let before_space = p.position;
+            p.whitespace();
+            if p.at("/>") {
+                self_closing = true;
+                p.position = p.position + 2;
+                finished = true;
+                break;
+            }
+            if p.at(">") {
+                p.position = p.position + 1;
+                finished = true;
+                break;
+            }
+            if p.position == p.source.length {
+                break;
+            }
+            if !p.html && before_space == p.position {
+                p.fail("attributes require whitespace");
+                break;
+            }
+            let attr_start = p.position;
+            let name = MarkupTags.name(p);
+            if name == "" {
+                if !p.html {
+                    p.fail("invalid attribute name");
+                    break;
+                }
+                p.position = p.position + 1;
+                continue;
+            }
+            if p.html {
+                name = name.to_lower();
+            } else if !MarkupXml.valid_name(name) {
+                p.fail("invalid attribute name");
+                break;
+            }
+            p.whitespace();
+            let value = "";
+            let value_start = p.position;
+            if p.at("=") {
+                p.position = p.position + 1;
+                p.whitespace();
+                if p.position == p.source.length {
+                    if !p.html {
+                        p.fail("missing attribute value");
+                    }
+                    break;
+                }
+                let quote = p.source[p.position];
+                if quote == '"' || quote == (char)39 {
+                    p.position = p.position + 1;
+                    value_start = p.position;
+                    while p.position < p.source.length && p.source[p.position] != quote {
+                        p.position = p.position + 1;
+                    }
+                    value = p.source.substring(value_start, p.position);
+                    if p.position == p.source.length && !p.html {
+                        p.fail("unterminated attribute value");
+                        break;
+                    }
+                    if p.position < p.source.length {
+                        p.position = p.position + 1;
+                    }
+                } else {
+                    if !p.html {
+                        p.fail("XML attribute values require quotes");
+                        break;
+                    }
+                    value_start = p.position;
+                    while p.position < p.source.length
+                        && !MarkupParser.space(p.source[p.position]) && !p.at(">") {
+                        p.position = p.position + 1;
+                    }
+                    value = p.source.substring(value_start, p.position);
+                }
+            } else if !p.html {
+                p.fail("XML attributes require a value");
+                break;
+            }
+            if !p.html {
+                if value.contains("<") {
+                    p.fail("XML attributes cannot contain a literal <");
+                    break;
+                }
+                value = value.replace("\n", " ").replace("\t", " ");
+            }
+            value = p.decode(value, value_start, true);
+            if seen.contains(name) {
+                if !p.html {
+                    p.position = attr_start;
+                    p.fail("duplicate attribute");
+                    break;
+                }
+            } else {
+                seen[name] = true;
+                if p.count >= p.max_nodes {
+                    p.fail("node limit exceeded");
+                    return;
+                }
+                p.count = p.count + 1;
+                node.attrs.push(MarkupAttribute(name, value));
+            }
+        }
+        if p.error.is_some() {
+            return;
+        }
+        if !finished && !p.html {
+            p.position = start;
+            p.fail("unterminated start tag");
+            return;
+        }
+        if p.html {
+            node.uri_value = "http://www.w3.org/1999/xhtml";
+        } else {
+            MarkupXml.namespaces(p, node);
+        }
+        if p.error.is_some() {
+            return;
+        }
+        if p.stack.length == 1 {
+            p.roots = p.roots + 1;
+            if !p.html && p.roots > 1 {
+                p.fail("multiple XML root elements");
+                return;
+            }
+        }
+        if p.stack.length > p.max_depth {
+            p.fail("depth limit exceeded");
+            return;
+        }
+        p.append(node);
+        if !self_closing && !(p.html && MarkupTags.void_name(tag)) {
+            p.stack.push(node);
+        }
+    }
+
+    internal static fun close(p: MarkupParser): void {
+        p.position = p.position + 2;
+        let tag = MarkupTags.name(p);
+        if p.html {
+            tag = tag.to_lower();
+        }
+        p.whitespace();
+        if !p.html && (!MarkupXml.valid_name(tag) || !p.at(">")) {
+            p.fail("invalid closing tag");
+            return;
+        }
+        while p.position < p.source.length && !p.at(">") {
+            p.position = p.position + 1;
+        }
+        if p.position == p.source.length {
+            if !p.html {
+                p.fail("unterminated closing tag");
+            }
+            return;
+        }
+        p.position = p.position + 1;
+        if !p.html {
+            if p.stack.length == 1 || p.current().name != tag {
+                p.fail("mismatched closing tag");
+                return;
+            }
+            p.stack.pop();
+            return;
+        }
+        let i = p.stack.length - 1;
+        while i > 0 {
+            if p.stack[i].name == tag {
+                while p.stack.length > i {
+                    p.stack.pop();
+                }
+                return;
+            }
+            i = i - 1;
+        }
+    }
+}

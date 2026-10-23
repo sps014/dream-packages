@@ -1,0 +1,18 @@
+module markup;
+import system;
+
+/// Decodes character references in text without parsing it as markup.
+public static class MarkupText {
+    /// Decodes HTML named/numeric references, preserving other text and unknown references.
+    /// Attribute mode leaves ambiguous semicolonless references unchanged, as HTML attributes require.
+    /// This performs one decoding pass and does not normalize literal newlines or NUL characters.
+    public static fun decode_html(source: string, attribute: bool = false): string {
+        return MarkupEntities(true).decode(source, 0, attribute).unwrap();
+    }
+
+    /// Decodes XML predefined/numeric references in one pass; unknown or invalid references return Err.
+    /// Other characters are preserved. This does not validate an XML document or normalize newlines.
+    public static fun decode_xml(source: string): Result<string, MarkupError> {
+        return MarkupEntities(false).decode(source, 0, false);
+    }
+}

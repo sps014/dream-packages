@@ -1,0 +1,40 @@
+module markup;
+import system;
+import system.text;
+
+/// An element attribute, including its resolved XML namespace.
+public class MarkupAttribute {
+    internal name_value: string;
+    internal uri_value: string;
+    internal text_value: string;
+
+    internal constructor(name: string, value: string, uri: string = "") {
+        this.name_value = name;
+        this.uri_value = uri;
+        this.text_value = value;
+    }
+
+    /// Qualified source name; HTML names are ASCII-lowercased.
+    public get name(): string {
+        return this.name_value;
+    }
+
+    /// Name after the namespace prefix, or the full name without a prefix.
+    public get local_name(): string {
+        let colon = this.name_value.index_of(':');
+        if colon.is_some() {
+            return this.name_value.substring(colon.unwrap() + 1, this.name_value.length);
+        }
+        return this.name_value;
+    }
+
+    /// Resolved namespace URI; empty for unprefixed attributes.
+    public get namespace_uri(): string {
+        return this.uri_value;
+    }
+
+    /// Decoded attribute value; boolean HTML attributes have an empty value.
+    public get value(): string {
+        return this.text_value;
+    }
+}

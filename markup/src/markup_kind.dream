@@ -1,0 +1,15 @@
+module markup;
+
+/// The kind of content held by a node.
+public enum MarkupKind {
+    /// A document container.
+    Document,
+    /// An element with attributes and child nodes.
+    Element,
+    /// Decoded character data, including CDATA and HTML raw text.
+    Text,
+    /// Comment content without its delimiters.
+    Comment,
+    /// An XML processing instruction without its delimiters.
+    ProcessingInstruction,
+}

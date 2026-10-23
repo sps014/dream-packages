@@ -1,0 +1,148 @@
+module markup;
+import system;
+import system.collections;
+import system.text;
+
+/// An immutable parsed node. Returned arrays are snapshots; child nodes remain shared.
+@allow_cycle
+public class MarkupNode {
+    internal kind_value: MarkupKind;
+    internal name_value: string;
+    internal uri_value: string;
+    internal text_value: string;
+    internal html: bool;
+    internal items: List<MarkupNode>;
+    internal attrs: List<MarkupAttribute>;
+    internal namespaces: Map<string, string>;
+
+    internal constructor(kind: MarkupKind, name: string, text: string, html: bool) {
+        this.kind_value = kind;
+        this.name_value = name;
+        this.uri_value = "";
+        this.text_value = text;
+        this.html = html;
+        this.items = List<MarkupNode>();
+        this.attrs = List<MarkupAttribute>();
+        this.namespaces = Map<string, string>();
+    }
+
+    /// Content category.
+    public get kind(): MarkupKind {
+        return this.kind_value;
+    }
+
+    /// Qualified element name or processing-instruction target; empty for text and comments.
+    public get name(): string {
+        return this.name_value;
+    }
+
+    /// Element name after any namespace prefix; other node kinds retain their full name.
+    public get local_name(): string {
+        if this.kind_value != MarkupKind.Element {
+            return this.name_value;
+        }
+        let colon = this.name_value.index_of(':');
+        if colon.is_some() {
+            return this.name_value.substring(colon.unwrap() + 1, this.name_value.length);
+        }
+        return this.name_value;
+    }
+
+    /// Resolved XML namespace, the HTML namespace for HTML elements, or empty otherwise.
+    public get namespace_uri(): string {
+        return this.uri_value;
+    }
+
+    /// This node's own text; element/document text is available through text_content().
+    public get text(): string {
+        return this.text_value;
+    }
+
+    /// Child nodes in source order, including text and comments.
+    public get children(): MarkupNode[] {
+        let values = List<MarkupNode>();
+        for (let child in this.items) {
+            values.push(child);
+        }
+        return values.take_array();
+    }
+
+    /// Attributes in source order, including namespace declarations.
+    public get attributes(): MarkupAttribute[] {
+        let values = List<MarkupAttribute>();
+        for (let attr in this.attrs) {
+            values.push(attr);
+        }
+        return values.take_array();
+    }
+
+    /// Finds a qualified attribute name; comparison is case-insensitive for HTML.
+    public fun attribute(name: string): Option<string> {
+        let key = name;
+        if this.html {
+            key = key.to_lower();
+        }
+        for (let attr in this.attrs) {
+            if attr.name == key {
+                return Option.Some(attr.value);
+            }
+        }
+        return Option.None;
+    }
+
+    /// Finds an attribute by namespace URI and local name.
+    public fun attribute_ns(uri: string, local_name: string): Option<string> {
+        for (let attr in this.attrs) {
+            if attr.namespace_uri == uri && attr.local_name == local_name {
+                return Option.Some(attr.value);
+            }
+        }
+        return Option.None;
+    }
+
+    /// Concatenates descendant character data in source order, excluding comments/instructions.
+    public fun text_content(): string {
+        let out = StringBuilder();
+        let pending = List<MarkupNode>();
+        pending.push(this);
+        while !pending.is_empty() {
+            let node = pending.pop().unwrap();
+            if node.kind == MarkupKind.Text {
+                out.append(node.text);
+            }
+            let i = node.items.length;
+            while i > 0 {
+                i = i - 1;
+                pending.push(node.items[i]);
+            }
+        }
+        return out.to_string();
+    }
+
+    /// Finds descendant elements in source order, excluding this node. Empty name matches all.
+    public fun descendants(name: string = ""): MarkupNode[] {
+        let key = name;
+        if this.html {
+            key = key.to_lower();
+        }
+        let result = List<MarkupNode>();
+        let pending = List<MarkupNode>();
+        let i = this.items.length;
+        while i > 0 {
+            i = i - 1;
+            pending.push(this.items[i]);
+        }
+        while !pending.is_empty() {
+            let node = pending.pop().unwrap();
+            if node.kind == MarkupKind.Element && (key == "" || node.name == key) {
+                result.push(node);
+            }
+            i = node.items.length;
+            while i > 0 {
+                i = i - 1;
+                pending.push(node.items[i]);
+            }
+        }
+        return result.take_array();
+    }
+}

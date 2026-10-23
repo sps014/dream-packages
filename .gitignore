@@ -1,3 +1,6 @@
 dream_packages/
 target/
 .DS_Store
+
+/dream.lock
+__pycache__/

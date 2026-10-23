@@ -1,0 +1,167 @@
+import system;
+import system.text;
+import system.testing;
+import markup;
+
+@test
+fun character_references_without_markup(): void {
+    Assert.eq(MarkupText.decode_html("<raw> &amp; &#39; &#128; &notit;"), "<raw> & ' € ¬it;");
+    Assert.eq(MarkupText.decode_html("&copy=1 &notit;", true), "&copy=1 &notit;");
+    Assert.eq(MarkupText.decode_xml("&lt;r&gt;&amp;").unwrap(), "<r>&");
+    Assert.eq(MarkupText.decode_xml("&amp;amp;").unwrap(), "&amp;");
+    Assert.is_true(MarkupText.decode_xml("&unknown;").is_err());
+    Assert.is_true(MarkupText.decode_xml("&#0;").is_err());
+    Assert.eq(MarkupText.decode_xml("&#x41;").unwrap(), "A");
+    Assert.is_true(MarkupText.decode_xml("&#X41;").is_err());
+    Assert.eq(MarkupText.decode_html("&#X41;"), "A");
+}
+
+@test
+fun xml_namespaces_and_content(): void {
+    let doc = MarkupDocument.parse_xml(
+        "<?xml version=\"1.0\"?><r xmlns=\"urn:r\" xmlns:x=\"urn:x\"><x:item x:id=\"7\" plain=\"a&amp;b\">hello<![CDATA[<world>]]>&#x1F600;</x:item><!--note--></r>"
+    ).unwrap();
+    Assert.eq(doc.root.unwrap().namespace_uri, "urn:r");
+    let item = doc.elements("x:item")[0];
+    Assert.eq(item.local_name, "item");
+    Assert.eq(item.namespace_uri, "urn:x");
+    Assert.eq(item.attribute_ns("urn:x", "id").unwrap(), "7");
+    Assert.eq(item.attribute("plain").unwrap(), "a&b");
+    Assert.eq(item.text_content(), "hello<world>😀");
+    Assert.eq(doc.root.unwrap().children.length, 2);
+}
+
+@test
+fun html_scraping_and_entities(): void {
+    let doc = MarkupDocument.parse_html(
+        "<!DOCTYPE html><META CONTENT='a&amp;b' disabled><ul><li>one<li>two</ul><script>if (a < b) { x='&amp;'; }</ScRiPt><p>&copy; &NotEqualTilde; &#x80; &#0;</p>"
+    ).unwrap();
+    let meta = doc.elements("META")[0];
+    Assert.eq(meta.attribute("content").unwrap(), "a&b");
+    Assert.eq(meta.attribute("DISABLED").unwrap(), "");
+    let items = doc.elements("li");
+    Assert.eq(items.length, 2);
+    Assert.eq(items[0].text_content(), "one");
+    Assert.eq(items[1].text_content(), "two");
+    Assert.eq(doc.elements("script")[0].text_content(), "if (a < b) { x='&amp;'; }");
+    Assert.eq(doc.elements("p")[0].text_content(), "© ≂̸ € �");
+    Assert.eq(
+        MarkupDocument.parse_html("<a title='&notit; &copy=1'>&notit;</a>")
+            .unwrap()
+            .root.unwrap()
+            .attribute("title")
+            .unwrap(),
+        "&notit; &copy=1"
+    );
+}
+
+@test
+fun rejects_malformed_xml_and_limits(): void {
+    let invalid = [
+        "",
+        "<r>",
+        "<a></b>",
+        "<a/><b/>",
+        "text<r/>",
+        "<r a='1' a='2'/>",
+        "<r a=unquoted/>",
+        "<r>&unknown;</r>",
+        "<r>&#0;</r>",
+        "<!DOCTYPE r SYSTEM 'file:///secret'><r/>",
+        "<x:r/>",
+        "<r xmlns:x='u' xmlns:y='u' x:a='1' y:a='2'/>",
+        "<r a='1'b='2'/>",
+        "<r><!--a--b--></r>"
+    ];
+    for (let source in invalid) {
+        Assert.is_true(MarkupDocument.parse_xml(source).is_err());
+    }
+    Assert.is_true(MarkupDocument.parse_xml("<r/>", max_chars: 3).is_err());
+    Assert.is_true(MarkupDocument.parse_html("<a><b><c>", max_depth: 2).is_err());
+    Assert.is_true(MarkupDocument.parse_html("<a>x<b>y", max_nodes: 2).is_err());
+    Assert.is_true(MarkupDocument.parse_html("", max_depth: 0).is_err());
+}
+
+@test
+fun namespace_scope_and_hostile_inputs(): void {
+    let doc = MarkupDocument.parse_xml(
+        "<r xmlns='urn:a' xmlns:x='urn:x'><c xmlns=''><x:z xml:lang='en'/></c><c/></r>"
+    ).unwrap();
+    let c = doc.elements("c");
+    Assert.eq(c[0].namespace_uri, "");
+    Assert.eq(c[1].namespace_uri, "urn:a");
+    Assert.eq(
+        doc.elements("x:z")[0].attribute_ns("http://www.w3.org/XML/1998/namespace", "lang").unwrap(),
+        "en"
+    );
+    Assert.eq(
+        MarkupDocument.parse_xml("<r a='x\ty&#10;z'/>")
+            .unwrap()
+            .root.unwrap()
+            .attribute("a")
+            .unwrap(),
+        "x y\nz"
+    );
+    Assert.is_true(MarkupDocument.parse_xml("<r><c/></r>", max_depth: 1).is_err());
+    Assert.is_true(MarkupDocument.parse_html("<r><br>", max_depth: 1).is_err());
+    Assert.is_true(MarkupDocument.parse_xml("<r a='1' b='2'/>", max_nodes: 2).is_err());
+    Assert.is_true(MarkupDocument.parse_xml("<?1?><r/>").is_err());
+    Assert.is_true(MarkupDocument.parse_xml("<r xmlns:p=''/>").is_err());
+    Assert.is_true(MarkupDocument.parse_xml("<r xmlns:xml='wrong'/>").is_err());
+    Assert.is_true(MarkupDocument.parse_xml("<r>]]></r>").is_err());
+    Assert.eq(
+        MarkupDocument.parse_html("<textarea>&lt; &amp;</textarea>")
+            .unwrap()
+            .root.unwrap()
+            .text_content(),
+        "< &"
+    );
+    Assert.eq(MarkupDocument.parse_html("<!--unfinished").unwrap().nodes[0].text, "unfinished");
+    Assert.eq(
+        MarkupDocument.parse_html("<a x=1 x=2>").unwrap().root.unwrap().attribute("x").unwrap(),
+        "1"
+    );
+}
+
+@test
+fun deterministic_malformed_input_mutations(): void {
+    let alphabet = "<>&/!'\"= abcdef012;\n";
+    let seed = 173L;
+    let round = 0;
+    while round < 300 {
+        let text = StringBuilder();
+        let i = 0;
+        while i < round % 90 {
+            seed = (seed * 1664525L + 1013904223L) % 4294967296L;
+            text.append_char(alphabet[(int)(seed % (long)alphabet.length)]);
+            i = i + 1;
+        }
+        let source = text.to_string();
+        Assert.is_true(MarkupDocument.parse_html(source, max_nodes: 256, max_depth: 90).is_ok());
+        let xml = MarkupDocument.parse_xml(source);
+        if xml.is_ok() {
+            Assert.is_true(xml.unwrap().root.is_some());
+        }
+        round = round + 1;
+    }
+}
+
+@test
+fun youtube_xml_and_raw_text_shapes(): void {
+    let dash = MarkupDocument.parse_xml(
+        "<MPD xmlns='urn:mpeg:dash:schema:mpd:2011'><Period><AdaptationSet mimeType='audio/mp4'><Representation id='140' bandwidth='128000'><BaseURL>https://example.test/media?a=1&amp;b=2</BaseURL></Representation></AdaptationSet></Period></MPD>"
+    ).unwrap();
+    Assert.eq(dash.elements("Representation")[0].attribute("id").unwrap(), "140");
+    Assert.eq(dash.elements("BaseURL")[0].text_content(), "https://example.test/media?a=1&b=2");
+    let captions = MarkupDocument.parse_xml(
+        "<timedtext format='3'><body><p t='1200' d='2300'><s t='0'>Hello </s><s t='500'>world</s></p></body></timedtext>"
+    ).unwrap();
+    Assert.eq(captions.elements("p")[0].text_content(), "Hello world");
+    Assert.eq(captions.elements("s")[1].attribute("t").unwrap(), "500");
+    let html = MarkupDocument.parse_html(
+        "<script>x</scripted>y</script><title>&#65 &unknown;</title>"
+    ).unwrap();
+    Assert.eq(html.elements("script")[0].text_content(), "x</scripted>y");
+    Assert.eq(html.elements("title")[0].text_content(), "A &unknown;");
+    Assert.eq(MarkupDocument.parse_xml("<?:a:b?><r/>").unwrap().nodes[0].local_name, ":a:b");
+}

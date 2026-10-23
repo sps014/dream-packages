@@ -1,0 +1,16 @@
+module markup;
+
+/// A parse or character-reference failure at a zero-based UTF-16 input position.
+public class MarkupError {
+    /// Zero-based UTF-16 position. Document parsing normalizes newlines first; text decoding does not.
+    public position: int;
+
+    /// Human-readable explanation, without copying the document into the message.
+    public message: string;
+
+    /// Creates a failure with a position and explanation.
+    public constructor(position: int, message: string) {
+        this.position = position;
+        this.message = message;
+    }
+}
