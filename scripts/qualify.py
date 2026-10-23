@@ -90,7 +90,7 @@ def main():
     # Keep the consumer outside the workspace so no ancestor dependency install can satisfy imports.
     consumer = Path(tempfile.mkdtemp(prefix="dream-package-consumer-"))
     manifest = ('[package]\nname = "package_consumer"\nversion = "0.1.0"\ntype = "test"\n'
-                '[dependencies]\nmarkup = "0.1.0"\nsha1 = "0.1.0"\nsemver = "0.1.1"\n'
+                '[dependencies]\n' + ''.join(f'{name} = "{version}"\n' for name, version in packages.items()) +
                 '[registries]\ndefault = ' + json.dumps(str(registry)) + '\n'
                 '[test]\ntargets = ["native", "node"]\n')
     (consumer / "dream.toml").write_text(manifest, encoding="utf-8", newline="\n")

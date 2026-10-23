@@ -3,11 +3,11 @@
 HTML scraping and namespace-aware XML parsing, implemented entirely in Dream.
 There are no native libraries, FFI bindings, JavaScript helpers, or runtime Python dependencies.
 
-## Use in a local project
+## Install
 
 ```toml
 [dependencies]
-markup = { path = "../dream-packages/markup" }
+markup = "0.1.0"
 ```
 
 ```dream

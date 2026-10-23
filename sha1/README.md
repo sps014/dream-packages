@@ -4,11 +4,11 @@ SHA-1 hashing implemented entirely in Dream, for existing protocol interoperabil
 No native libraries or external process/runtime helpers are required. SHA-1 is unsuitable
 for new collision-resistant security designs; use a modern digest for new protocols.
 
-## Use in a local project
+## Install
 
 ```toml
 [dependencies]
-sha1 = { path = "../dream-packages/sha1" }
+sha1 = "0.1.0"
 ```
 
 ```dream
