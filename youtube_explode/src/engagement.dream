@@ -1,5 +1,6 @@
 module youtube_explode;
 import system;
+import system.text;
 
 /// Video engagement statistics; hidden statistics use zero.
 public class Engagement {
@@ -33,5 +34,10 @@ public class Engagement {
     public get average_rating(): double {
         let total = (double)this.like_count_value + (double)this.dislike_count_value;
         return total == 0.0d ? 0.0d : 1.0d + 4.0d * (double)this.like_count_value / total;
+    }
+
+    /// Displays the rating with one decimal digit, using invariant formatting.
+    public override fun to_string(): string {
+        return "Rating: " + Fmt.format("{0:.1}", [this.average_rating]);
     }
 }

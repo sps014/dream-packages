@@ -1,0 +1,198 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.collections;
+
+internal static class SearchMetadata {
+    internal static fun parse(
+        response: JsonValue,
+        filter: SearchFilter
+    ): Result<SearchPage, YoutubeError> {
+        let root = YoutubeJson.path(response, ["contents"]);
+        if root.is_null() {
+            root = YoutubeJson.path(response, ["onResponseReceivedCommands"]);
+        }
+        let results = List<SearchResult>();
+        if filter == SearchFilter.All || filter == SearchFilter.Video {
+            for (let value in YoutubeRenderers.descendants(root, "videoRenderer")) {
+                let id = VideoId.parse(
+                    YoutubeJson.path(value, ["videoId"]).as_string().unwrap_or("")
+                );
+                let title_value = YoutubeJson.path(value, ["title"]);
+                let details = YoutubeRenderers.byline(value);
+                let channel = YoutubeRenderers.channel_id(details);
+                if channel.is_empty() {
+                    channel = YoutubeJson.path(
+                        value,
+                        [
+                            "channelThumbnailSupportedRenderers",
+                            "channelThumbnailWithLinkRenderer",
+                            "navigationEndpoint",
+                            "browseEndpoint",
+                            "browseId"
+                        ]
+                    ).as_string().unwrap_or("");
+                }
+                let author = YoutubeJson.path(details, ["text"]).as_string();
+                if id.is_err() || title_value.is_null() || channel.is_empty() || author.is_none() {
+                    return Result.Err(
+                        YoutubeError(
+                            "extraction",
+                            "video search ID, title, or author is missing or invalid"
+                        )
+                    );
+                }
+                let parsed_channel = ChannelId.parse(channel);
+                if parsed_channel.is_err() {
+                    continue;
+                }
+                let thumbnails = List<Thumbnail>();
+                let loaded = YoutubeRenderers.thumbnails(
+                    YoutubeJson.path(value, ["thumbnail", "thumbnails"]),
+                    thumbnails
+                );
+                if loaded.is_err() {
+                    return Result.Err(loaded.unwrap_err());
+                }
+                for (let image in Thumbnail.defaults(id.unwrap())) {
+                    thumbnails.push(image);
+                }
+                results.push(
+                    SearchResult.Video(
+                        VideoSearchResult(
+                            id.unwrap(),
+                            YoutubeJson.text(title_value),
+                            Author(parsed_channel.unwrap(), author.unwrap()),
+                            YoutubeRenderers.duration(value),
+                            thumbnails.take_array()
+                        )
+                    )
+                );
+            }
+        }
+        if filter == SearchFilter.All || filter == SearchFilter.Playlist {
+            let playlists = YoutubeRenderers.descendants(root, "lockupViewModel");
+            // Upstream uses lockups whenever that representation is present.
+            if playlists.length == 0 {
+                playlists = YoutubeRenderers.descendants(root, "playlistRenderer");
+            }
+            for (let value in playlists) {
+                let parsed = SearchMetadata.playlist(value);
+                if parsed.is_err() {
+                    return Result.Err(parsed.unwrap_err());
+                }
+                results.push(SearchResult.Playlist(parsed.unwrap()));
+            }
+        }
+        if filter == SearchFilter.All || filter == SearchFilter.Channel {
+            for (let value in YoutubeRenderers.descendants(root, "channelRenderer")) {
+                let id = ChannelId.parse(
+                    YoutubeJson.path(value, ["channelId"]).as_string().unwrap_or("")
+                );
+                let title = YoutubeJson.path(value, ["title"]);
+                if id.is_err() || title.is_null() {
+                    return Result.Err(
+                        YoutubeError(
+                            "extraction",
+                            "channel search ID or title is missing or invalid"
+                        )
+                    );
+                }
+                let thumbnails = List<Thumbnail>();
+                let loaded = YoutubeRenderers.thumbnails(
+                    YoutubeJson.path(value, ["thumbnail", "thumbnails"]),
+                    thumbnails
+                );
+                if loaded.is_err() {
+                    return Result.Err(loaded.unwrap_err());
+                }
+                results.push(
+                    SearchResult.Channel(
+                        ChannelSearchResult(
+                            id.unwrap(),
+                            YoutubeJson.text(title),
+                            thumbnails.take_array()
+                        )
+                    )
+                );
+            }
+        }
+        let continuation: Option<string> = Option.None;
+        let commands = YoutubeRenderers.descendants(root, "continuationCommand");
+        if commands.length > 0 {
+            continuation = YoutubeJson.path(commands[0], ["token"]).as_string();
+            if continuation.is_some() && continuation.unwrap().trim().is_empty() {
+                continuation = Option.None;
+            }
+        }
+        return Result.Ok(SearchPage(results.take_array(), continuation));
+    }
+
+    static fun playlist(value: JsonValue): Result<PlaylistSearchResult, YoutubeError> {
+        let id_text = YoutubeJson.path(value, ["contentId"]).as_string();
+        if id_text.is_none() {
+            id_text = YoutubeJson.path(value, ["playlistId"]).as_string();
+        }
+        let id = PlaylistId.parse(id_text.unwrap_or(""));
+        let metadata = YoutubeJson.path(value, ["metadata", "lockupMetadataViewModel"]);
+        let title = YoutubeJson.path(metadata, ["title", "content"]).as_string();
+        if title.is_none() && !YoutubeJson.path(value, ["title"]).is_null() {
+            title = Option.Some(YoutubeJson.text(YoutubeJson.path(value, ["title"])));
+        }
+        if id.is_err() || title.is_none() {
+            return Result.Err(
+                YoutubeError("extraction", "playlist search ID or title is missing or invalid")
+            );
+        }
+        let details = YoutubeRenderers.byline(value);
+        let parts = YoutubeRenderers.descendants(metadata, "metadataParts");
+        if parts.length > 0 && parts[0].is_array() {
+            details = YoutubeJson.path(parts[0].at(0).unwrap_or(JsonValue.null()), ["text"]);
+        }
+        let channel = YoutubeRenderers.channel_id(details);
+        let name = YoutubeJson.path(details, ["content"])
+            .as_string()
+            .unwrap_or(YoutubeJson.path(details, ["text"]).as_string().unwrap_or(""));
+        let author: Option<Author> = Option.None;
+        if !channel.is_empty() && !name.is_empty() {
+            let parsed = ChannelId.parse(channel);
+            if parsed.is_err() {
+                return Result.Err(
+                    YoutubeError("extraction", "invalid playlist search owner channel")
+                );
+            }
+            author = Option.Some(Author(parsed.unwrap(), name));
+        }
+        let thumbnails = List<Thumbnail>();
+        let images = YoutubeJson.path(
+            value,
+            [
+                "contentImage",
+                "collectionThumbnailViewModel",
+                "primaryThumbnail",
+                "thumbnailViewModel",
+                "image",
+                "sources"
+            ]
+        );
+        if images.is_array() {
+            let loaded = YoutubeRenderers.thumbnails(images, thumbnails);
+            if loaded.is_err() {
+                return Result.Err(loaded.unwrap_err());
+            }
+        } else {
+            for (let images in YoutubeRenderers.descendants(
+                YoutubeJson.path(value, ["thumbnails"]),
+                "thumbnails"
+            )) {
+                let loaded = YoutubeRenderers.thumbnails(images, thumbnails);
+                if loaded.is_err() {
+                    return Result.Err(loaded.unwrap_err());
+                }
+            }
+        }
+        return Result.Ok(
+            PlaylistSearchResult(id.unwrap(), title.unwrap(), author, thumbnails.take_array())
+        );
+    }
+}

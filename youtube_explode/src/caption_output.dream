@@ -1,0 +1,62 @@
+module youtube_explode;
+import system;
+import system.io;
+
+internal static class CaptionOutput {
+    internal static async fun write(
+        track: ClosedCaptionTrack,
+        writer: AsyncWriter,
+        progress: Option<fun(double): void>,
+        token: Option<CancellationToken>
+    ): Result<long, YoutubeError> {
+        let captions = track.captions;
+        let total = 0L;
+        let i = 0;
+        for (let caption in captions) {
+            if CancellationToken.is_cancelled_opt(token) {
+                return Result.Err(YoutubeError("cancelled", "caption output cancelled"));
+            }
+            i = i + 1;
+            let cue = ClosedCaptionTrack.srt_entry(caption, i);
+            if cue.is_err() {
+                return Result.Err(cue.unwrap_err());
+            }
+            let bytes = Encoding.utf8_encode(cue.unwrap());
+            let offset = 0;
+            while offset < bytes.length {
+                if CancellationToken.is_cancelled_opt(token) {
+                    return Result.Err(YoutubeError("cancelled", "caption output cancelled"));
+                }
+                let written = writer.write_async(bytes.slice(offset, bytes.length), token).await;
+                if written.is_err() {
+                    let error = written.unwrap_err();
+                    return Result.Err(
+                        YoutubeError(
+                            error.code() == "ECANCELLED" ? "cancelled" : "io",
+                            error.message()
+                        )
+                    );
+                }
+                let count = written.unwrap();
+                if count <= 0 || count > bytes.length - offset {
+                    return Result.Err(
+                        YoutubeError("io", "caption writer made invalid write progress")
+                    );
+                }
+                offset = offset + count;
+                total = total + (long)count;
+            }
+            if progress.is_some() {
+                progress.unwrap()((double)i / (double)captions.length);
+            }
+        }
+        let flushed = writer.flush_async(token).await;
+        if flushed.is_err() {
+            let error = flushed.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "io", error.message())
+            );
+        }
+        return Result.Ok(total);
+    }
+}

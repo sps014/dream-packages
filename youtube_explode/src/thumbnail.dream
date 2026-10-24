@@ -41,4 +41,9 @@ public class Thumbnail {
             Thumbnail(base + "hqdefault.jpg", Resolution(480, 360))
         ];
     }
+
+    /// Displays this value in the upstream human-readable form.
+    public override fun to_string(): string {
+        return "Thumbnail (" + this.resolution_value.to_string() + ")";
+    }
 }

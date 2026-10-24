@@ -1,0 +1,41 @@
+module youtube_explode;
+import system;
+
+/// A channel reference returned by search.
+public class ChannelSearchResult {
+    id_value: ChannelId;
+    title_value: string;
+    thumbnails_value: Thumbnail[];
+
+    /// Creates an immutable metadata value, copying supplied arrays.
+    public constructor(id: ChannelId, title: string, thumbnails: Thumbnail[]) {
+        this.id_value = id;
+        this.title_value = title;
+        this.thumbnails_value = thumbnails.slice(0, thumbnails.length);
+    }
+
+    /// Canonical channel identifier.
+    public get id(): ChannelId {
+        return this.id_value;
+    }
+
+    /// Channel display title.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Channel artwork; the array is a snapshot.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value.slice(0, this.thumbnails_value.length);
+    }
+
+    /// Canonical YouTube URL.
+    public get url(): string {
+        return "https://www.youtube.com/channel/" + this.id_value.value;
+    }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Channel (" + this.title_value + ")";
+    }
+}

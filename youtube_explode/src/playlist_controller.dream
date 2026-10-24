@@ -1,0 +1,82 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+
+internal class PlaylistController {
+    http: YoutubeHttp;
+    origin: string;
+
+    internal constructor(http: YoutubeHttp, origin: string) {
+        this.http = http;
+        this.origin = origin;
+    }
+
+    internal async fun browse(
+        id: PlaylistId,
+        token: Option<CancellationToken>
+    ): Result<Playlist, YoutubeError> {
+        let lifetime = [this];
+        let body = JsonValue.dict();
+        body["browseId"] = JsonValue.from_string("VL" + id.value);
+        body["context"] = YoutubeApi.context();
+        let response = YoutubeApi.post(lifetime[0].http, lifetime[0].origin, "browse", body, token)
+            .await;
+        if response.is_err() {
+            return Result.Err(response.unwrap_err());
+        }
+        return PlaylistMetadata.browse(id, response.unwrap());
+    }
+
+    internal async fun next(
+        id: PlaylistId,
+        video: Option<VideoId>,
+        index: int,
+        visitor: Option<string>,
+        token: Option<CancellationToken>
+    ): Result<JsonValue, YoutubeError> {
+        let lifetime = [this];
+        let attempt = 0;
+        while attempt < 6 {
+            let body = JsonValue.dict();
+            body["playlistId"] = JsonValue.from_string(id.value);
+            body["videoId"] = video.is_some()
+                ? JsonValue.from_string(video.unwrap().value) : JsonValue.null();
+            body["playlistIndex"] = JsonValue.from_int(index);
+            body["context"] = YoutubeApi.context(visitor);
+            let response = YoutubeApi.post(
+                lifetime[0].http,
+                lifetime[0].origin,
+                "next",
+                body,
+                token
+            ).await;
+            if response.is_err() {
+                return Result.Err(response.unwrap_err());
+            }
+            if PlaylistMetadata.next_root(response.unwrap()).is_object() {
+                return response;
+            }
+            if attempt == 0 && index <= 0 && (visitor.is_none() || visitor.unwrap().is_empty()) {
+                let endpoint = YoutubeHttp.endpoint(lifetime[0].origin, "/playlist");
+                if endpoint.is_err() {
+                    return Result.Err(endpoint.unwrap_err());
+                }
+                let url = endpoint.unwrap();
+                url.query.set("list", id.value);
+                let opened = lifetime[0].http.send(HttpRequest(HttpMethod.Get, url), token).await;
+                if opened.is_err() {
+                    let error = opened.unwrap_err();
+                    return Result.Err(
+                        YoutubeError(YoutubeHttp.category(error.code()), error.message())
+                    );
+                }
+                opened.unwrap().close();
+            } else if index <= 0 || visitor.is_none() || visitor.unwrap().is_empty() {
+                return Result.Err(YoutubeError("unavailable", "playlist is not available"));
+            }
+            attempt = attempt + 1;
+        }
+        return Result.Err(YoutubeError("unavailable", "playlist is not available"));
+    }
+}

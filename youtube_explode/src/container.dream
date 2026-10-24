@@ -1,0 +1,63 @@
+module youtube_explode;
+import system;
+
+/// Media container name, equality, and audio-only format capabilities.
+public class Container: Equatable<Container> {
+    name_value: string;
+
+    /// Retains the supplied container name, including unknown future formats.
+    public constructor(name: string) {
+        this.name_value = name;
+    }
+
+    /// Container name, usable as a filename extension.
+    public get name(): string {
+        return this.name_value;
+    }
+
+    /// True for mp3, m4a, wav, wma, ogg, aac, and opus, ignoring case.
+    /// False means the container may hold video, even if a particular stream contains only audio.
+    public get is_audio_only(): bool {
+        let name = this.name_value.to_lower();
+        return name
+            == "mp3"
+            || name
+            == "m4a"
+            || name == "wav" || name == "wma" || name == "ogg" || name == "aac" || name == "opus";
+    }
+
+    /// MPEG-2 Audio Layer III; YouTube does not provide this container natively.
+    public static get mp3(): Container {
+        return Container("mp3");
+    }
+
+    /// MPEG-4 Part 14.
+    public static get mp4(): Container {
+        return Container("mp4");
+    }
+
+    /// Web Media.
+    public static get webm(): Container {
+        return Container("webm");
+    }
+
+    /// 3rd Generation Partnership Project.
+    public static get tgpp(): Container {
+        return Container("3gpp");
+    }
+
+    /// Compares names ignoring case.
+    public fun equals(borrow other: Container): bool {
+        return this.name_value.to_lower() == other.name_value.to_lower();
+    }
+
+    /// Hashes the name ignoring case.
+    public override fun hash_code(): int {
+        return this.name_value.to_lower().hash_code();
+    }
+
+    /// Displays the stored container name.
+    public override fun to_string(): string {
+        return this.name_value;
+    }
+}

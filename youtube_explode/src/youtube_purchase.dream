@@ -1,0 +1,48 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+import system.text;
+
+internal static class YoutubePurchase {
+    internal static fun preview(response: JsonValue): Option<VideoId> {
+        let status = YoutubeJson.path(response, ["playabilityStatus", "errorScreen"]);
+        let text = YoutubeJson.path(
+            status,
+            ["playerLegacyDesktopYpcTrailerRenderer", "trailerVideoId"]
+        ).as_string();
+        let trailer = YoutubeJson.path(status, ["ypcTrailerRenderer"]);
+        if text.is_none() {
+            let vars = YoutubeJson.path(trailer, ["playerVars"]).as_string();
+            if vars.is_some() {
+                let url = Url.parse("https://www.youtube.com/?" + vars.unwrap());
+                if url.is_ok() {
+                    text = url.unwrap().query.get("video_id");
+                }
+            }
+        }
+        if text.is_none() {
+            let raw = YoutubeJson.path(trailer, ["playerResponse"]).as_string();
+            if raw.is_some() {
+                let decoded = Encoding.base64_decode(
+                    raw.unwrap().replace("-", "+").replace("_", "/")
+                );
+                if decoded.is_ok() {
+                    let matched = Regex.compile("video_id=(.{11})")
+                        .unwrap()
+                        .match(Encoding.utf8_decode(decoded.unwrap()));
+                    if matched.length >= 2 {
+                        text = Option.Some(matched[1]);
+                    }
+                }
+            }
+        }
+        if text.is_some() {
+            let parsed = VideoId.parse(text.unwrap());
+            if parsed.is_ok() {
+                return Option.Some(parsed.unwrap());
+            }
+        }
+        return Option.None;
+    }
+}

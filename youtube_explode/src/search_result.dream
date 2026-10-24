@@ -1,0 +1,29 @@
+module youtube_explode;
+
+/// A typed video, playlist, or channel search result; switch on its variant for specific fields.
+public enum SearchResult {
+    /// A video and its uploader, optional duration, and thumbnails.
+    Video(VideoSearchResult),
+    /// A playlist and its optional owner and thumbnails.
+    Playlist(PlaylistSearchResult),
+    /// A channel and its artwork.
+    Channel(ChannelSearchResult),
+
+    /// Display title shared by all result kinds.
+    public get title(): string {
+        return switch (this) {
+            Video(value) => value.title,
+            Playlist(value) => value.title,
+            Channel(value) => value.title,
+        };
+    }
+
+    /// Canonical YouTube URL shared by all result kinds.
+    public get url(): string {
+        return switch (this) {
+            Video(value) => value.url,
+            Playlist(value) => value.url,
+            Channel(value) => value.url,
+        };
+    }
+}

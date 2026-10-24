@@ -1,0 +1,147 @@
+module youtube_explode_tests;
+import system;
+import system.json;
+import system.testing;
+import youtube_explode;
+
+fun browse_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"sidebar\": {\"playlistSidebarRenderer\": {\"items\": [{\"playlistSidebarPrimaryInfoRenderer\": {\"titleForm\": {\"inlineFormRenderer\": {\"formField\": {\"textInputFormFieldRenderer\": {\"value\": \"Playlist title\"}}}}, \"descriptionForm\": {\"inlineFormRenderer\": {\"formField\": {\"textInputFormFieldRenderer\": {\"value\": \"Description Ω\"}}}}, \"stats\": [{\"runs\": [{\"text\": \"12\"}, {\"text\": \" videos\"}]}], \"thumbnailRenderer\": {\"playlistCustomThumbnailRenderer\": {\"thumbnail\": {\"thumbnails\": [{\"url\": \"https://example.test/cover\", \"width\": 480, \"height\": 270}]}}}}}, {\"playlistSidebarSecondaryInfoRenderer\": {\"videoOwner\": {\"videoOwnerRenderer\": {\"title\": {\"runs\": [{\"text\": \"Creator Ω\"}]}, \"navigationEndpoint\": {\"browseEndpoint\": {\"browseId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\"}}}}}}]}}}"
+    ).unwrap();
+}
+
+fun next_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"contents\": {\"twoColumnWatchNextResults\": {\"playlist\": {\"playlist\": {\"title\": \"System mix\", \"videoCountText\": {\"runs\": [{\"text\": \"1\"}, {\"text\": \" of \"}, {\"text\": \"3\"}]}, \"contents\": [{\"playlistPanelVideoRenderer\": {\"videoId\": \"yIVRs6YSbOM\", \"title\": {\"runs\": [{\"text\": \"One \"}, {\"text\": \"Ω\"}]}, \"longBylineText\": {\"runs\": [{\"text\": \"Creator Ω\", \"navigationEndpoint\": {\"browseEndpoint\": {\"browseId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\"}}}]}, \"lengthText\": {\"simpleText\": \"1:02:03\"}, \"thumbnail\": {\"thumbnails\": [{\"url\": \"https://example.test/video.jpg\", \"width\": 320, \"height\": 180}]}, \"navigationEndpoint\": {\"watchEndpoint\": {\"index\": 0}}}}]}}}}}"
+    ).unwrap();
+}
+
+fun search_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"contents\": {\"sectionListRenderer\": {\"contents\": [{\"channelRenderer\": {\"channelId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\", \"title\": {\"simpleText\": \"Channel Ω\"}}}, {\"wrapper\": {\"videoRenderer\": {\"videoId\": \"yIVRs6YSbOM\", \"title\": {\"runs\": [{\"text\": \"One \"}, {\"text\": \"Ω\"}]}, \"longBylineText\": {\"runs\": [{\"text\": \"Creator Ω\", \"navigationEndpoint\": {\"browseEndpoint\": {\"browseId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\"}}}]}, \"lengthText\": {\"simpleText\": \"1:02:03\"}, \"thumbnail\": {\"thumbnails\": [{\"url\": \"https://example.test/video.jpg\", \"width\": 320, \"height\": 180}]}, \"navigationEndpoint\": {\"watchEndpoint\": {\"index\": 0}}}}}, {\"videoRenderer\": {\"videoId\": \"yIVRs6YSbOM\", \"title\": {\"runs\": [{\"text\": \"One \"}, {\"text\": \"Ω\"}]}, \"longBylineText\": {\"runs\": [{\"text\": \"Creator Ω\", \"navigationEndpoint\": {\"browseEndpoint\": {\"browseId\": \"UC\"}}}]}, \"lengthText\": {\"simpleText\": \"1:02:03\"}, \"thumbnail\": {\"thumbnails\": [{\"url\": \"https://example.test/video.jpg\", \"width\": 320, \"height\": 180}]}, \"navigationEndpoint\": {\"watchEndpoint\": {\"index\": 0}}}}, {\"lockupViewModel\": {\"contentId\": \"PLfixture123\", \"metadata\": {\"lockupMetadataViewModel\": {\"title\": {\"content\": \"Playlist Ω\"}, \"metadataRows\": [{\"metadataParts\": [{\"text\": {\"content\": \"Creator Ω\", \"commandRuns\": [{\"onTap\": {\"innertubeCommand\": {\"browseEndpoint\": {\"browseId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\"}}}}]}}]}]}}, \"contentImage\": {\"collectionThumbnailViewModel\": {\"primaryThumbnail\": {\"thumbnailViewModel\": {\"image\": {\"sources\": [{\"url\": \"https://example.test/list.jpg\", \"width\": 640, \"height\": 360}]}}}}}}}, {\"continuationItemRenderer\": {\"continuationEndpoint\": {\"continuationCommand\": {\"token\": \"next Ω\"}}}}]}}}"
+    ).unwrap();
+}
+
+fun legacy_search_fixture(): JsonValue {
+    return Json.deserialize<JsonValue>(
+        "{\"onResponseReceivedCommands\": [{\"playlistRenderer\": {\"playlistId\": \"PLlegacy123\", \"title\": {\"simpleText\": \"Legacy\"}, \"longBylineText\": {\"runs\": [{\"text\": \"Creator Ω\", \"navigationEndpoint\": {\"browseEndpoint\": {\"browseId\": \"UC3xnGqlcL3y-GXz5N3wiTJQ\"}}}]}, \"thumbnails\": [{\"thumbnails\": [{\"url\": \"https://example.test/old.jpg\", \"width\": 120, \"height\": 90}]}]}}]}"
+    ).unwrap();
+}
+
+@test
+fun channel_open_graph_and_uploads(): void {
+    let channel = Channel.from_page(
+        "<META property='og:url' content='https://www.youtube.com/channel/UC3xnGqlcL3y-GXz5N3wiTJQ'><meta property=og:title content='Music &amp; Ω'><meta property=og:image content='https://example.test/a=s88-c-k/s144?x=1&amp;y=2'>"
+    ).unwrap();
+    Assert.eq(channel.title, "Music & Ω");
+    Assert.eq(channel.thumbnails[0].url, "https://example.test/a=s88-c-k/s144?x=1&y=2");
+    Assert.eq(channel.thumbnails[0].resolution.width, 144);
+    Assert.eq(channel.uploads_playlist_id.value, "UU3xnGqlcL3y-GXz5N3wiTJQ");
+    Assert.eq(channel.url, "https://www.youtube.com/channel/UC3xnGqlcL3y-GXz5N3wiTJQ");
+    Assert.eq(
+        Channel.from_page("<meta property=og:title content=Missing>").unwrap_err().code(),
+        "extraction"
+    );
+    let fallback = Channel.from_page(
+        "<meta property=og:url content=https://www.youtube.com/channel/UC3xnGqlcL3y-GXz5N3wiTJQ><meta property=og:title content=Title><meta property=og:image content=https://example.test/image>"
+    ).unwrap();
+    Assert.eq(fallback.thumbnails[0].resolution.height, 100);
+}
+
+@test
+fun playlist_browse_metadata_and_errors(): void {
+    let id = PlaylistId.parse("PLfixture123").unwrap();
+    let response = browse_fixture();
+    let playlist = Playlist.from_browse_response(id, response).unwrap();
+    Assert.eq(playlist.title, "Playlist title");
+    Assert.eq(playlist.description, "Description Ω");
+    Assert.eq(playlist.author.unwrap().channel_title, "Creator Ω");
+    Assert.eq(playlist.count.unwrap(), 12);
+    Assert.eq(playlist.thumbnails[0].resolution.width, 480);
+    let primary = response["sidebar"]["playlistSidebarRenderer"]["items"]
+        .at(0)
+        .unwrap()["playlistSidebarPrimaryInfoRenderer"];
+    primary.remove("titleForm");
+    Assert.eq(Playlist.from_browse_response(id, response).unwrap_err().code(), "extraction");
+    Assert.eq(
+        Playlist.from_browse_response(id, JsonValue.dict()).unwrap_err().code(),
+        "unavailable"
+    );
+    Assert.eq(playlist.title, "Playlist title");
+    let ownerless = browse_fixture();
+    ownerless["sidebar"]["playlistSidebarRenderer"]["items"]
+        .at(1)
+        .unwrap()
+        .remove("playlistSidebarSecondaryInfoRenderer");
+    Assert.is_true(Playlist.from_browse_response(id, ownerless).unwrap().author.is_none());
+}
+
+@test
+fun playlist_next_limited_metadata(): void {
+    let playlist = Playlist.from_next_response(
+        PlaylistId.parse("RDfixture123").unwrap(),
+        next_fixture()
+    ).unwrap();
+    Assert.eq(playlist.title, "System mix");
+    Assert.is_true(playlist.author.is_none());
+    Assert.eq(playlist.description, "");
+    Assert.eq(playlist.count.unwrap(), 3);
+    Assert.eq(playlist.thumbnails[0].url, "https://example.test/video.jpg");
+}
+
+@test
+fun search_renderers_lockups_filters_and_snapshots(): void {
+    let page = SearchPage.from_response(search_fixture()).unwrap();
+    Assert.eq(page.results.length, 3);
+    Assert.eq(page.results[0].title, "One Ω");
+    Assert.eq(page.results[1].title, "Playlist Ω");
+    Assert.eq(page.results[2].title, "Channel Ω");
+    Assert.eq(page.continuation.unwrap(), "next Ω");
+    switch (page.results[0]) {
+        Video(video) => {
+            Assert.eq(video.duration_ms.unwrap(), 3723000.0d);
+            Assert.eq(video.thumbnails.length, 4);
+            Assert.eq(video.author.channel_title, "Creator Ω");
+        },
+        _ => Assert.is_true(false),
+    }
+    switch (page.results[1]) {
+        Playlist(playlist) => {
+            Assert.eq(playlist.author.unwrap().channel_title, "Creator Ω");
+            Assert.eq(playlist.thumbnails[0].resolution.width, 640);
+        },
+        _ => Assert.is_true(false),
+    }
+    Assert.eq(
+        SearchPage.from_response(search_fixture(), SearchFilter.Channel).unwrap().results.length,
+        1
+    );
+    Assert.eq(
+        SearchPage.from_response(legacy_search_fixture()).unwrap().results[0].title,
+        "Legacy"
+    );
+    Assert.eq(SearchPage.from_response(JsonValue.dict()).unwrap().results.length, 0);
+    let values = page.results;
+    let batch = YoutubeBatch<SearchResult>(values);
+    values[0] = page.results[2];
+    Assert.eq(batch.items[0].title, "One Ω");
+    let snapshot = batch.items;
+    snapshot[0] = page.results[2];
+    Assert.eq(batch.items[0].title, "One Ω");
+    Assert.eq(batch.count, 3);
+}
+
+@test
+fun purchase_previews_preserve_typed_context(): void {
+    for (let text in [
+        "{\"playabilityStatus\": {\"errorScreen\": {\"playerLegacyDesktopYpcTrailerRenderer\": {\"trailerVideoId\": \"yIVRs6YSbOM\"}}}}",
+        "{\"playabilityStatus\": {\"errorScreen\": {\"ypcTrailerRenderer\": {\"playerVars\": \"other=1&video_id=yIVRs6YSbOM\"}}}}",
+        "{\"playabilityStatus\": {\"errorScreen\": {\"ypcTrailerRenderer\": {\"playerResponse\": \"anVuayB2aWRlb19pZD15SVZSczZZU2JPTSB0YWls\"}}}}"
+    ]) {
+        let response = Json.deserialize<JsonValue>(text).unwrap();
+        let error = StreamManifest.from_player_response(response).unwrap_err();
+        Assert.eq(error.code(), "purchase_required");
+        Assert.eq(error.preview_video_id.unwrap().value, "yIVRs6YSbOM");
+    }
+    Assert.is_true(YoutubeError("http", "offline").preview_video_id.is_none());
+}

@@ -1,0 +1,69 @@
+module youtube_explode;
+import system;
+
+/// A video reference from a playlist, including its source playlist.
+public class PlaylistVideo {
+    playlist_id_value: PlaylistId;
+    id_value: VideoId;
+    title_value: string;
+    author_value: Author;
+    duration_ms_value: Option<double>;
+    thumbnails_value: Thumbnail[];
+
+    /// Creates an immutable metadata value, copying supplied arrays.
+    public constructor(
+        playlist_id: PlaylistId,
+        id: VideoId,
+        title: string,
+        author: Author,
+        duration_ms: Option<double>,
+        thumbnails: Thumbnail[]
+    ) {
+        this.playlist_id_value = playlist_id;
+        this.id_value = id;
+        this.title_value = title;
+        this.author_value = author;
+        this.duration_ms_value = duration_ms;
+        this.thumbnails_value = thumbnails.slice(0, thumbnails.length);
+    }
+
+    /// Playlist containing this entry.
+    public get playlist_id(): PlaylistId {
+        return this.playlist_id_value;
+    }
+
+    /// Canonical video identifier.
+    public get id(): VideoId {
+        return this.id_value;
+    }
+
+    /// Video title; unavailable titles are empty.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Uploading channel.
+    public get author(): Author {
+        return this.author_value;
+    }
+
+    /// Duration in milliseconds, or None for unknown/live duration.
+    public get duration_ms(): Option<double> {
+        return this.duration_ms_value;
+    }
+
+    /// Artwork including upstream default images; the array is a snapshot.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value.slice(0, this.thumbnails_value.length);
+    }
+
+    /// Canonical YouTube URL.
+    public get url(): string {
+        return "https://www.youtube.com/watch?v=" + this.id_value.value;
+    }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Video (" + this.title_value + ")";
+    }
+}

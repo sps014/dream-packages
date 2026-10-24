@@ -2,16 +2,39 @@ module youtube_explode;
 import system;
 
 /// Language metadata associated with captions or audio tracks.
-public class Language {
+public class Language: Equatable<Language> {
     /// ISO language tag, such as en or pt-BR.
-    public code: string;
+    code_value: string;
+
+    public get code(): string {
+        return this.code_value;
+    }
 
     /// YouTube's localized display name.
-    public name: string;
+    name_value: string;
+
+    public get name(): string {
+        return this.name_value;
+    }
 
     /// Creates language metadata without changing its tag or display name.
     public constructor(code: string, name: string) {
-        this.code = code;
-        this.name = name;
+        this.code_value = code;
+        this.name_value = name;
+    }
+
+    /// Compares language tags ignoring case; localized display names do not affect identity.
+    public fun equals(borrow other: Language): bool {
+        return this.code_value.to_lower() == other.code_value.to_lower();
+    }
+
+    /// Hashes the case-insensitive language tag.
+    public override fun hash_code(): int {
+        return this.code_value.to_lower().hash_code();
+    }
+
+    /// Displays the tag and localized name.
+    public override fun to_string(): string {
+        return this.code_value + " (" + this.name_value + ")";
     }
 }

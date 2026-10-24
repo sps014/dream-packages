@@ -1,0 +1,38 @@
+module youtube_explode;
+import system;
+import system.text;
+import markup;
+
+internal static class ChannelPage {
+    internal static fun parse(source: string): Result<Channel, YoutubeError> {
+        let parsed = MarkupDocument.parse_html(source);
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", parsed.unwrap_err().message));
+        }
+        let page = parsed.unwrap();
+        let values: string[] = ["", "", ""];
+        let i = 0;
+        for (let key in ["og:url", "og:title", "og:image"]) {
+            let nodes = page.query(MarkupSelector.parse("meta[property='" + key + "']").unwrap());
+            if nodes.length > 0 {
+                values[i] = nodes[0].attribute("content").unwrap_or("");
+            }
+            i = i + 1;
+        }
+        let id = ChannelId.parse(values[0]);
+        if id.is_err() || values[1].is_empty() || values[2].is_empty() {
+            return Result.Err(YoutubeError("extraction", "channel ID, title, or image is missing"));
+        }
+        let size = 100;
+        let matches = Regex.compile("\\bs\\d+\\b", RegexFlags.Global).unwrap().match(values[2]);
+        for (let matched in matches) {
+            let number = int.parse(matched.substring(1, matched.length));
+            if number.is_ok() && number.unwrap() > 0 {
+                size = number.unwrap();
+            }
+        }
+        return Result.Ok(
+            Channel(id.unwrap(), values[1], [Thumbnail(values[2], Resolution(size, size))])
+        );
+    }
+}

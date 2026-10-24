@@ -64,8 +64,10 @@ def main():
                 "youtube_explode": ["Hello & world\n"]}
     for package, outputs in expected.items():
         text = (ROOT / package / "README.md").read_text(encoding="utf-8")
-        examples = [code for code in re.findall(r"```dream\n(.*?)\n```", text, re.S)
+        programs = [code for code in re.findall(r"```dream\n(.*?)\n```", text, re.S)
                     if "fun main()" in code]
+        examples = [code for code in programs if not code.startswith("// Requires YouTube network access.")]
+        network_examples = [code for code in programs if code.startswith("// Requires YouTube network access.")]
         if len(examples) != len(outputs):
             raise SystemExit(f"Review expected example outputs for {package}.")
         for index, (code, output) in enumerate(zip(examples, outputs)):
@@ -74,6 +76,10 @@ def main():
             actual = run([dream, "run", path], cwd=work, capture=True)
             if output not in actual:
                 raise SystemExit(f"Unexpected example output: {path}\n{actual}")
+        for index, code in enumerate(network_examples):
+            path = work / f"{package}_network_example_{index}.dream"
+            path.write_text("module " + package + "_network_example;\n" + code + "\n", encoding="utf-8", newline="\n")
+            run([dream, path], cwd=work)
     registry = work / "registry"
     registry.mkdir()
     for package, version in packages.items():
@@ -99,6 +105,8 @@ def main():
         'module package_consumer;\nimport system;\nimport system.testing;\nimport markup;\nimport sha1;\nimport semver;\nimport youtube_explode;\n'
         '@test\nfun consumer(): void {\n'
         '    Assert.eq(VideoId.parse("https://youtu.be/yIVRs6YSbOM").unwrap().value, "yIVRs6YSbOM");\n'
+        '    Assert.eq(FileSize(1536L).to_string(), "1.5 KB");\n'
+        '    Assert.is_true(Container("MP4").equals(Container.mp4));\n'
         '    Assert.eq(SemVer.parse("1.2.3").unwrap().major, 1);\n'
         '    let doc = MarkupDocument.parse_xml("<r>A &amp; B</r>").unwrap();\n'
         '    Assert.eq(doc.root.unwrap().text_content(), "A & B");\n'
@@ -106,6 +114,9 @@ def main():
         '"a9993e364706816aba3e25717850c26c9cd0d89d");\n}\n',
         encoding="utf-8", newline="\n")
     run([dreamer, "test"], cwd=consumer)
+    for script in ["qualify_youtube.py", "qualify_youtube_browsing.py"]:
+        for mode in [[], ["--release"]]:
+            run([sys.executable, str(ROOT / "scripts" / script), "--dream", dream, "--dreamer", dreamer] + mode)
     print(f"PASS: native/Node debug/release, README examples, archive licenses, and clean registry consumer. Evidence: {work}; consumer: {consumer}")
 
 

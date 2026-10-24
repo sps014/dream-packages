@@ -2,31 +2,38 @@ module youtube_explode;
 import system;
 import system.net;
 
-/// YouTube operations sharing one HTTP client and its cookies and connection pools.
+/// YouTube operations sharing an HTTP client, connection pools, and a native YouTube cookie jar.
 public class YoutubeClient {
     http: HttpClient;
     owns_http: bool;
     video_client: VideoClient;
     stream_client: StreamClient;
     caption_client: ClosedCaptionClient;
+    channel_client: ChannelClient;
+    playlist_client: PlaylistClient;
+    search_client: SearchClient;
 
     /// Uses the supplied HTTP client or creates an owned default client when omitted.
     /// origin selects the YouTube service or an HTTP fixture/mirror for API requests.
+    /// cookies shares a native YouTube CookieJar, including supplied authenticated cookies.
+    /// Native defaults create a jar shared by all operations; Node supports stateless requests without one.
     public constructor(
         http: Option<HttpClient> = Option.None,
-        origin: string = "https://www.youtube.com"
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
     ) {
         this.owns_http = http.is_none();
         this.http = http.is_some() ? http.unwrap() : HttpClient();
-        this.video_client = VideoClient(this.http, origin);
-        this.stream_client = StreamClient(this.http, origin);
-        this.caption_client = ClosedCaptionClient(this.http, origin);
-    }
-
-    del() {
-        if this.owns_http {
-            this.http.close();
+        let cookie_values = cookies;
+        if cookie_values.is_none() && HttpCapabilities.cookie_jars {
+            cookie_values = Option.Some(CookieJar());
         }
+        this.video_client = VideoClient(this.http, origin, cookie_values);
+        this.stream_client = StreamClient(this.http, origin, cookie_values);
+        this.caption_client = ClosedCaptionClient(this.http, origin, cookie_values);
+        this.channel_client = ChannelClient(this.http, origin, cookie_values);
+        this.playlist_client = PlaylistClient(this.http, origin, cookie_values);
+        this.search_client = SearchClient(this.http, origin, cookie_values);
     }
 
     /// Video metadata and watch-page extraction.
@@ -51,5 +58,20 @@ public class YoutubeClient {
             return this.http.close();
         }
         return Result.Ok(Unit());
+    }
+
+    /// Channel resolution and uploads enumeration.
+    public get channels(): ChannelClient {
+        return this.channel_client;
+    }
+
+    /// Playlist metadata and video enumeration.
+    public get playlists(): PlaylistClient {
+        return this.playlist_client;
+    }
+
+    /// Filtered search and continuation paging.
+    public get search(): SearchClient {
+        return this.search_client;
     }
 }

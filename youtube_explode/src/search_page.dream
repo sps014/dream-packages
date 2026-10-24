@@ -1,0 +1,33 @@
+module youtube_explode;
+import system;
+import system.json;
+
+/// One decoded search response with an optional continuation token.
+public class SearchPage {
+    values: SearchResult[];
+    continuation_value: Option<string>;
+
+    /// Copies results and retains the continuation token for an additional request.
+    public constructor(results: SearchResult[], continuation: Option<string> = Option.None) {
+        this.values = results.slice(0, results.length);
+        this.continuation_value = continuation;
+    }
+
+    /// Results in upstream order: videos, playlists, then channels; array access returns a snapshot.
+    public get results(): SearchResult[] {
+        return this.values.slice(0, this.values.length);
+    }
+
+    /// Token for the next page, or None at the end.
+    public get continuation(): Option<string> {
+        return this.continuation_value;
+    }
+
+    /// Decodes renderer and lockup forms without network access; malformed required fields return extraction.
+    public static fun from_response(
+        response: JsonValue,
+        filter: SearchFilter = SearchFilter.All
+    ): Result<SearchPage, YoutubeError> {
+        return SearchMetadata.parse(response, filter);
+    }
+}

@@ -1,0 +1,125 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+import system.collections;
+
+/// YouTube search with typed results, filtering, and lazy continuation paging.
+public class SearchClient {
+    http: YoutubeHttp;
+    origin: string;
+
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.http = YoutubeHttp(http, cookies);
+        this.origin = origin;
+    }
+
+    /// Retrieves one page, optionally continuing a prior response with its token.
+    public async fun get_page(
+        query: string,
+        filter: SearchFilter = SearchFilter.All,
+        continuation: Option<string> = Option.None,
+        token: Option<CancellationToken> = Option.None
+    ): Result<SearchPage, YoutubeError> {
+        let lifetime = [this];
+        let body = JsonValue.dict();
+        body["query"] = JsonValue.from_string(query);
+        let parameter = "";
+        if filter == SearchFilter.Video {
+            parameter = "EgIQAQ%3D%3D";
+        } else if filter == SearchFilter.Playlist {
+            parameter = "EgIQAw%3D%3D";
+        } else if filter == SearchFilter.Channel {
+            parameter = "EgIQAg%3D%3D";
+        }
+        body["params"] = parameter.is_empty() ? JsonValue.null() : JsonValue.from_string(parameter);
+        body["continuation"] = continuation.is_some()
+            ? JsonValue.from_string(continuation.unwrap()) : JsonValue.null();
+        body["context"] = YoutubeApi.context();
+        let response = YoutubeApi.post(
+            lifetime[0].http,
+            lifetime[0].origin,
+            "search",
+            body,
+            CancellationToken.resolve(token)
+        ).await;
+        if response.is_err() {
+            return Result.Err(response.unwrap_err());
+        }
+        return SearchPage.from_response(response.unwrap(), filter);
+    }
+
+    /// Lazily retrieves pages and deduplicates result IDs across them, preserving upstream type ordering.
+    /// Yields one error then ends on failure. Repeated continuation tokens end iteration safely.
+    public async fun batches(
+        query: string,
+        filter: SearchFilter = SearchFilter.All,
+        token: Option<CancellationToken> = Option.None
+    ): AsyncIterable<Result<YoutubeBatch<SearchResult>, YoutubeError>> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let seen = Set<string>();
+        let tokens = Set<string>();
+        let continuation: Option<string> = Option.None;
+        let complete = false;
+        while !complete {
+            let page = lifetime[0].get_page(query, filter, continuation, effective).await;
+            if page.is_err() {
+                let failure: Result<YoutubeBatch<SearchResult>, YoutubeError> = Result.Err(
+                    page.unwrap_err()
+                );
+                yield failure;
+                yield break;
+            }
+            let results = List<SearchResult>();
+            for (let value in page.unwrap().results) {
+                let key = switch (value) {
+                    Video(item) => item.id.value,
+                    Playlist(item) => item.id.value,
+                    Channel(item) => item.id.value,
+                };
+                if !seen.contains(key) {
+                    seen.add(key);
+                    results.push(value);
+                }
+            }
+            continuation = page.unwrap().continuation;
+            let success: Result<YoutubeBatch<SearchResult>, YoutubeError> = Result.Ok(
+                YoutubeBatch<SearchResult>(results.take_array())
+            );
+            yield success;
+            complete = continuation.is_none() || tokens.contains(continuation.unwrap());
+            if !complete {
+                tokens.add(continuation.unwrap());
+            }
+        }
+    }
+
+    /// Flattens search batches lazily; use filter to request videos, playlists, channels, or all kinds.
+    /// An error is yielded once and ends the sequence. Breaking await-for stops later requests.
+    public async fun results(
+        query: string,
+        filter: SearchFilter = SearchFilter.All,
+        token: Option<CancellationToken> = Option.None
+    ): AsyncIterable<Result<SearchResult, YoutubeError>> {
+        let lifetime = [this];
+        await for (let batch in lifetime[0].batches(query, filter, token)) {
+            if batch.is_err() {
+                let failure: Result<SearchResult, YoutubeError> = Result.Err(batch.unwrap_err());
+                yield failure;
+                yield break;
+            }
+            for (let item in batch.unwrap().items) {
+                let success: Result<SearchResult, YoutubeError> = Result.Ok(item);
+                yield success;
+            }
+        }
+    }
+}

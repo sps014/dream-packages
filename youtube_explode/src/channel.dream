@@ -1,0 +1,53 @@
+module youtube_explode;
+import system;
+
+/// Channel metadata resolved from a canonical, handle, user, or custom page.
+public class Channel {
+    id_value: ChannelId;
+    title_value: string;
+    thumbnails_value: Thumbnail[];
+
+    /// Creates an immutable metadata value, copying supplied arrays.
+    public constructor(id: ChannelId, title: string, thumbnails: Thumbnail[]) {
+        this.id_value = id;
+        this.title_value = title;
+        this.thumbnails_value = thumbnails.slice(0, thumbnails.length);
+    }
+
+    /// Canonical channel identifier.
+    public get id(): ChannelId {
+        return this.id_value;
+    }
+
+    /// Channel display title.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Channel artwork in source order; the array is a snapshot.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value.slice(0, this.thumbnails_value.length);
+    }
+
+    /// Canonical YouTube URL.
+    public get url(): string {
+        return "https://www.youtube.com/channel/" + this.id_value.value;
+    }
+
+    /// Uploads playlist obtained by replacing the channel ID prefix UC with UU.
+    public get uploads_playlist_id(): PlaylistId {
+        return PlaylistId.parse(
+            "UU" + this.id_value.value.substring(2, this.id_value.value.length)
+        ).unwrap();
+    }
+
+    /// Extracts Open Graph channel metadata from HTML; missing or invalid fields return extraction.
+    public static fun from_page(source: string): Result<Channel, YoutubeError> {
+        return ChannelPage.parse(source);
+    }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Channel (" + this.title_value + ")";
+    }
+}

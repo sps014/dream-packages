@@ -1,0 +1,141 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+import system.collections;
+
+/// Playlist metadata and lazy, duplicate-free enumeration of playlist videos.
+public class PlaylistClient {
+    controller: PlaylistController;
+
+    internal constructor(http: YoutubeHttp, origin: string) {
+        this.controller = PlaylistController(http, origin);
+    }
+
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.controller = PlaylistController(YoutubeHttp(http, cookies), origin);
+    }
+
+    /// Fetches metadata via browse, falling back to next for system playlists and unavailable browse pages.
+    public async fun get(
+        id: PlaylistId,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Playlist, YoutubeError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let browse = lifetime[0].controller.browse(id, effective).await;
+        if browse.is_ok() || browse.unwrap_err().code() != "unavailable" {
+            return browse;
+        }
+        let next = lifetime[0].controller.next(id, Option.None, 0, Option.None, effective).await;
+        if next.is_err() {
+            return Result.Err(next.unwrap_err());
+        }
+        return PlaylistMetadata.next(id, next.unwrap());
+    }
+
+    /// Lazily fetches video batches, deduplicating IDs across pages while retaining source order.
+    /// A failed page yields Err once and ends. Unavailability after a successful indexed page means EOF.
+    /// Closing an iterator or breaking await-for prevents further page requests.
+    public async fun video_batches(
+        id: PlaylistId,
+        token: Option<CancellationToken> = Option.None
+    ): AsyncIterable<Result<YoutubeBatch<PlaylistVideo>, YoutubeError>> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let seen = Set<string>();
+        let video: Option<VideoId> = Option.None;
+        let index = 0;
+        let visitor: Option<string> = Option.None;
+        let complete = false;
+        while !complete {
+            let response = lifetime[0].controller.next(id, video, index, visitor, effective).await;
+            if response.is_err() {
+                if response.unwrap_err().code() != "unavailable" || index <= 0 {
+                    let failure: Result<YoutubeBatch<PlaylistVideo>, YoutubeError> = Result.Err(
+                        response.unwrap_err()
+                    );
+                    yield failure;
+                }
+                yield break;
+            }
+            let root = response.unwrap();
+            let values = YoutubeRenderers.descendants(
+                YoutubeJson.path(PlaylistMetadata.next_root(root), ["contents"]),
+                "playlistPanelVideoRenderer"
+            );
+            let videos = List<PlaylistVideo>();
+            for (let value in values) {
+                let parsed_id = VideoId.parse(
+                    YoutubeJson.path(value, ["videoId"]).as_string().unwrap_or("")
+                );
+                let parsed_index = YoutubeJson.path(
+                    value,
+                    ["navigationEndpoint", "watchEndpoint", "index"]
+                ).as_int();
+                if parsed_id.is_err() || parsed_index.is_none() || parsed_index.unwrap() < 0 {
+                    let failure: Result<YoutubeBatch<PlaylistVideo>, YoutubeError> = Result.Err(
+                        YoutubeError(
+                            "extraction",
+                            "playlist video ID or index is missing or invalid"
+                        )
+                    );
+                    yield failure;
+                    yield break;
+                }
+                video = Option.Some(parsed_id.unwrap());
+                index = parsed_index.unwrap();
+                if seen.contains(parsed_id.unwrap().value) {
+                    continue;
+                }
+                seen.add(parsed_id.unwrap().value);
+                let parsed = PlaylistMetadata.video(id, value);
+                if parsed.is_err() {
+                    let failure: Result<YoutubeBatch<PlaylistVideo>, YoutubeError> = Result.Err(
+                        parsed.unwrap_err()
+                    );
+                    yield failure;
+                    yield break;
+                }
+                videos.push(parsed.unwrap());
+            }
+            if videos.is_empty() {
+                complete = true;
+                continue;
+            }
+            if visitor.is_none() {
+                visitor = YoutubeJson.path(root, ["responseContext", "visitorData"]).as_string();
+            }
+            let success: Result<YoutubeBatch<PlaylistVideo>, YoutubeError> = Result.Ok(
+                YoutubeBatch<PlaylistVideo>(videos.take_array())
+            );
+            yield success;
+        }
+    }
+
+    /// Flattens video batches lazily. Errors are yielded once; early exit stops further requests.
+    public async fun videos(
+        id: PlaylistId,
+        token: Option<CancellationToken> = Option.None
+    ): AsyncIterable<Result<PlaylistVideo, YoutubeError>> {
+        let lifetime = [this];
+        await for (let batch in lifetime[0].video_batches(id, token)) {
+            if batch.is_err() {
+                let failure: Result<PlaylistVideo, YoutubeError> = Result.Err(batch.unwrap_err());
+                yield failure;
+                yield break;
+            }
+            for (let video in batch.unwrap().items) {
+                let success: Result<PlaylistVideo, YoutubeError> = Result.Ok(video);
+                yield success;
+            }
+        }
+    }
+}

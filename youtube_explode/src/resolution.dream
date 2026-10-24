@@ -2,7 +2,7 @@ module youtube_explode;
 import system;
 
 /// Pixel dimensions of a thumbnail or video.
-public class Resolution {
+public class Resolution: Equatable<Resolution> {
     width_value: int;
     height_value: int;
 
@@ -25,5 +25,20 @@ public class Resolution {
     /// Pixel area, using 64-bit arithmetic.
     public get area(): long {
         return (long)this.width_value * (long)this.height_value;
+    }
+
+    /// Compares exact width and height values.
+    public fun equals(borrow other: Resolution): bool {
+        return this.width_value == other.width_value && this.height_value == other.height_value;
+    }
+
+    /// Hashes both dimensions for maps and sets.
+    public override fun hash_code(): int {
+        return this.width_value.hash_code() ^ this.height_value.hash_code();
+    }
+
+    /// Displays width and height as WIDTHxHEIGHT.
+    public override fun to_string(): string {
+        return this.width_value.to_string() + "x" + this.height_value.to_string();
     }
 }

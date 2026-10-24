@@ -1,0 +1,52 @@
+module youtube_explode;
+import system;
+
+/// A signed bitrate with binary unit conversion and display formatting.
+public class Bitrate: Equatable<Bitrate>, Comparable<Bitrate> {
+    value: long;
+
+    /// Stores a signed count without scaling or rounding.
+    public constructor(bits_per_second: long) {
+        this.value = bits_per_second;
+    }
+
+    /// Exact count in bits per second.
+    public get bits_per_second(): long {
+        return this.value;
+    }
+
+    /// Binary kilobits per second, dividing the exact count by 1024^1.
+    public get kilobits_per_second(): double {
+        return (double)this.value / 1024.0d;
+    }
+
+    /// Binary megabits per second, dividing the exact count by 1024^2.
+    public get megabits_per_second(): double {
+        return (double)this.value / 1048576.0d;
+    }
+
+    /// Binary gigabits per second, dividing the exact count by 1024^3.
+    public get gigabits_per_second(): double {
+        return (double)this.value / 1073741824.0d;
+    }
+
+    /// Orders exact integer counts without floating-point conversion.
+    public fun compare(borrow other: Bitrate): int {
+        return this.value < other.value ? -1 : (this.value > other.value ? 1 : 0);
+    }
+
+    /// True when the exact counts match.
+    public fun equals(borrow other: Bitrate): bool {
+        return this.value == other.value;
+    }
+
+    /// Hashes the exact count for use in maps and sets.
+    public override fun hash_code(): int {
+        return this.value.hash_code();
+    }
+
+    /// Displays the largest binary unit, with at most two decimal digits.
+    public override fun to_string(): string {
+        return MediaUnits.format(this.value, ["Bit/s", "Kbit/s", "Mbit/s", "Gbit/s"]);
+    }
+}

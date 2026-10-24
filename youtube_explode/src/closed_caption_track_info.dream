@@ -3,19 +3,36 @@ import system;
 
 /// Metadata identifying one downloadable closed-caption track.
 public class ClosedCaptionTrackInfo {
+    url_value: string;
+
     /// Track URL supplied by YouTube.
-    public url: string;
+    public get url(): string {
+        return this.url_value;
+    }
+
+    language_value: Language;
 
     /// Track language tag and display name.
-    public language: Language;
+    public get language(): Language {
+        return this.language_value;
+    }
+
+    is_auto_generated_value: bool;
 
     /// True for automatically generated captions.
-    public is_auto_generated: bool;
+    public get is_auto_generated(): bool {
+        return this.is_auto_generated_value;
+    }
 
     /// Creates caption-track metadata.
     public constructor(url: string, language: Language, is_auto_generated: bool) {
-        this.url = url;
-        this.language = language;
-        this.is_auto_generated = is_auto_generated;
+        this.url_value = url;
+        this.language_value = language;
+        this.is_auto_generated_value = is_auto_generated;
+    }
+
+    /// Displays this value in the upstream human-readable form.
+    public override fun to_string(): string {
+        return "CC Track (" + this.language_value.to_string() + ")";
     }
 }

@@ -1,0 +1,53 @@
+module youtube_explode;
+import system;
+
+/// A playlist reference returned by search.
+public class PlaylistSearchResult {
+    id_value: PlaylistId;
+    title_value: string;
+    author_value: Option<Author>;
+    thumbnails_value: Thumbnail[];
+
+    /// Creates an immutable metadata value, copying supplied arrays.
+    public constructor(
+        id: PlaylistId,
+        title: string,
+        author: Option<Author>,
+        thumbnails: Thumbnail[]
+    ) {
+        this.id_value = id;
+        this.title_value = title;
+        this.author_value = author;
+        this.thumbnails_value = thumbnails.slice(0, thumbnails.length);
+    }
+
+    /// Canonical playlist identifier.
+    public get id(): PlaylistId {
+        return this.id_value;
+    }
+
+    /// Playlist display title.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Playlist owner, or None for ownerless system playlists.
+    public get author(): Option<Author> {
+        return this.author_value;
+    }
+
+    /// Playlist artwork; the array is a snapshot.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value.slice(0, this.thumbnails_value.length);
+    }
+
+    /// Canonical YouTube URL.
+    public get url(): string {
+        return "https://www.youtube.com/playlist?list=" + this.id_value.value;
+    }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Playlist (" + this.title_value + ")";
+    }
+}

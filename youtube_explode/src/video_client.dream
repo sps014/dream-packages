@@ -6,10 +6,15 @@ import system.net;
 public class VideoClient {
     internal controller: VideoController;
 
-    /// Shares a caller-owned HTTP client. origin selects the YouTube server or an HTTP fixture/mirror.
-    /// Request bodies are limited to 16 MiB; broken watch pages are retried at most five times.
-    public constructor(http: HttpClient, origin: string = "https://www.youtube.com") {
-        this.controller = VideoController(http, origin);
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.controller = VideoController(YoutubeHttp(http, cookies), origin);
     }
 
     /// Fetches a watch page, then resolves a player response when inline data is absent.

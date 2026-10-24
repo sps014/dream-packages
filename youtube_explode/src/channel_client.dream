@@ -1,0 +1,111 @@
+module youtube_explode;
+import system;
+import system.net;
+
+/// Resolves channel pages by ID, handle, username, and legacy custom slug.
+public class ChannelClient {
+    http: YoutubeHttp;
+    origin: string;
+
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.http = YoutubeHttp(http, cookies);
+        this.origin = origin;
+    }
+
+    async fun route(path: string, token: Option<CancellationToken>): Result<Channel, YoutubeError> {
+        let lifetime = [this];
+        let endpoint = YoutubeHttp.endpoint(lifetime[0].origin, path);
+        if endpoint.is_err() {
+            return Result.Err(endpoint.unwrap_err());
+        }
+        let attempt = 0;
+        while attempt < 6 {
+            let body = lifetime[0]
+                .http.text(HttpRequest(HttpMethod.Get, endpoint.unwrap()), token)
+                .await;
+            if body.is_err() {
+                return Result.Err(body.unwrap_err());
+            }
+            let parsed = Channel.from_page(body.unwrap());
+            if parsed.is_ok() {
+                return parsed;
+            }
+            attempt = attempt + 1;
+        }
+        return Result.Err(YoutubeError("extraction", "channel page is broken after six attempts"));
+    }
+
+    /// Fetches metadata for a channel ID. Movies & TV uses upstream's static artwork.
+    public async fun get(
+        id: ChannelId,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Channel, YoutubeError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        if CancellationToken.is_cancelled_opt(effective) {
+            return Result.Err(YoutubeError("cancelled", "channel request cancelled"));
+        }
+        if id.value == "UCuVPpxrm2VAgpH3Ktln4HXg" {
+            return Result.Ok(
+                Channel(
+                    id,
+                    "Movies & TV",
+                    [
+                        Thumbnail(
+                            "https://www.gstatic.com/youtube/img/tvfilm/clapperboard_profile.png",
+                            Resolution(1024, 1024)
+                        )
+                    ]
+                )
+            );
+        }
+        return lifetime[0].route("/channel/" + id.value, effective).await;
+    }
+
+    /// Resolves an existing /user/ username to its canonical channel.
+    public async fun get_by_user(
+        name: UserName,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Channel, YoutubeError> {
+        let lifetime = [this];
+        return lifetime[0].route("/user/" + name.value, CancellationToken.resolve(token)).await;
+    }
+
+    /// Resolves a legacy /c/ custom slug to its canonical channel.
+    public async fun get_by_slug(
+        slug: ChannelSlug,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Channel, YoutubeError> {
+        let lifetime = [this];
+        return lifetime[0].route("/c/" + slug.value, CancellationToken.resolve(token)).await;
+    }
+
+    /// Resolves an @handle to its canonical channel.
+    public async fun get_by_handle(
+        handle: ChannelHandle,
+        token: Option<CancellationToken> = Option.None
+    ): Result<Channel, YoutubeError> {
+        let lifetime = [this];
+        return lifetime[0].route("/@" + handle.value, CancellationToken.resolve(token)).await;
+    }
+
+    /// Enumerates the channel's uploads playlist lazily, yielding each video or one terminal error.
+    public async fun uploads(
+        id: ChannelId,
+        token: Option<CancellationToken> = Option.None
+    ): AsyncIterable<Result<PlaylistVideo, YoutubeError>> {
+        let lifetime = [this];
+        let uploads = PlaylistId.parse("UU" + id.value.substring(2, id.value.length)).unwrap();
+        let client = PlaylistClient(lifetime[0].http, lifetime[0].origin);
+        await for (let value in client.videos(uploads, token)) {
+            yield value;
+        }
+    }
+}

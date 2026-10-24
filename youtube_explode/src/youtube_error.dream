@@ -5,14 +5,20 @@ import system;
 public class YoutubeError: Error {
     error_code: string;
     error_message: string;
+    preview: Option<VideoId>;
 
     /// Creates a stable category and human-readable context; supplied cookies/headers must be omitted.
-    public constructor(code: string, message: string) {
+    public constructor(
+        code: string,
+        message: string,
+        preview_video_id: Option<VideoId> = Option.None
+    ) {
         this.error_code = code;
         this.error_message = message;
+        this.preview = preview_video_id;
     }
 
-    /// Stable category: invalid_input, extraction, unavailable, unplayable, http, io, cancelled, or rate_limited.
+    /// Stable category: invalid_input, extraction, unavailable, unplayable, purchase_required, http, io, cancelled, or rate_limited.
     public fun code(): string {
         return this.error_code;
     }
@@ -20,5 +26,10 @@ public class YoutubeError: Error {
     /// Human-readable failure context.
     public fun message(): string {
         return this.error_message;
+    }
+
+    /// Trailer/preview video for purchase_required failures, or None for other errors.
+    public get preview_video_id(): Option<VideoId> {
+        return this.preview;
     }
 }

@@ -42,6 +42,12 @@ public class StreamManifest {
         response: JsonValue,
         cipher: Option<SignatureCipher> = Option.None
     ): Result<StreamManifest, YoutubeError> {
+        let preview = YoutubePurchase.preview(response);
+        if preview.is_some() {
+            return Result.Err(
+                YoutubeError("purchase_required", "video requires purchase", preview)
+            );
+        }
         let streams = List<StreamInfo>();
         let data = YoutubeJson.path(response, ["streamingData"]);
         for (let key in ["formats", "adaptiveFormats"]) {
@@ -94,7 +100,9 @@ public class StreamManifest {
             if kind.is_some() && stream.kind != kind.unwrap() {
                 continue;
             }
-            if best.is_none() || stream.bitrate > best.unwrap().bitrate {
+            if best.is_none()
+                || stream.bitrate.bits_per_second > best.unwrap()
+                .bitrate.bits_per_second {
                 best = Option.Some(stream);
             }
         }
@@ -115,19 +123,7 @@ public class StreamManifest {
                 continue;
             }
             let previous = best.unwrap().video_quality.unwrap();
-            if quality.max_height > previous.max_height
-                || (
-                    quality.max_height
-                        == previous.max_height && quality.framerate > previous.framerate
-                )
-                || (
-                    quality.max_height
-                        == previous.max_height
-                        && quality.framerate
-                        == previous.framerate
-                        && quality.label.to_lower()
-                        .compare(previous.label.to_lower()) > 0
-                ) {
+            if quality.compare(previous) > 0 {
                 best = Option.Some(stream);
             }
         }

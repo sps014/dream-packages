@@ -1,15 +1,22 @@
 module youtube_explode;
 import system;
 import system.net;
+import system.io;
 
-/// Downloads and parses caption tracks using an existing HttpClient and its cookie policy.
+/// Retrieves captions and writes SRT using a shared HTTP client and native YouTube cookie jar.
 public class ClosedCaptionClient {
-    http: HttpClient;
+    http: YoutubeHttp;
     controller: VideoController;
 
-    /// Shares a caller-owned client. Closing that client cancels pending downloads.
-    public constructor(http: HttpClient, origin: string = "https://www.youtube.com") {
-        this.http = http;
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.http = YoutubeHttp(http, cookies);
         this.controller = VideoController(this.http, origin);
     }
 
@@ -49,9 +56,7 @@ public class ClosedCaptionClient {
         let sent = lifetime[0].http.send(request, effective_token).await;
         if sent.is_err() {
             let error = sent.unwrap_err();
-            return Result.Err(
-                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
-            );
+            return Result.Err(YoutubeError(YoutubeHttp.category(error.code()), error.message()));
         }
         let response = sent.unwrap();
         if response.status < 200 || response.status >= 300 {
@@ -68,13 +73,58 @@ public class ClosedCaptionClient {
         response.close();
         if text.is_err() {
             let error = text.unwrap_err();
-            return Result.Err(
-                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
-            );
+            return Result.Err(YoutubeError(YoutubeHttp.category(error.code()), error.message()));
         }
         if effective_token.is_some() && effective_token.unwrap().is_cancelled {
             return Result.Err(YoutubeError("cancelled", "caption download cancelled"));
         }
         return ClosedCaptionTrack.parse_xml(text.unwrap());
+    }
+
+    /// Fetches captions and writes numbered UTF-8 SRT cues to an AsyncWriter, leaving it open.
+    /// Reports progress after each complete cue, flushes on success, and returns the byte count.
+    /// Errors or cancellation preserve completed writes; an empty track reports no progress.
+    public async fun write_to(
+        track: ClosedCaptionTrackInfo,
+        writer: AsyncWriter,
+        progress: Option<fun(double): void> = Option.None,
+        token: Option<CancellationToken> = Option.None
+    ): Result<long, YoutubeError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let fetched = lifetime[0].get(track, effective).await;
+        if fetched.is_err() {
+            return Result.Err(fetched.unwrap_err());
+        }
+        return CaptionOutput.write(fetched.unwrap(), writer, progress, effective).await;
+    }
+
+    /// Creates or truncates path, downloads a track as UTF-8 SRT, and closes the file on every outcome.
+    /// Partial files remain on failure. Cancellation before opening leaves existing content untouched.
+    public async fun download(
+        track: ClosedCaptionTrackInfo,
+        path: string,
+        progress: Option<fun(double): void> = Option.None,
+        token: Option<CancellationToken> = Option.None
+    ): Result<long, YoutubeError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        if CancellationToken.is_cancelled_opt(effective) {
+            return Result.Err(YoutubeError("cancelled", "caption download cancelled"));
+        }
+        let opened = FileHandle.open_async(path, FileMode.Write, effective).await;
+        if opened.is_err() {
+            let error = opened.unwrap_err();
+            return Result.Err(
+                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "io", error.message())
+            );
+        }
+        let writer = opened.unwrap();
+        let output = lifetime[0].write_to(track, writer, progress, effective).await;
+        let closed = writer.close();
+        if output.is_ok() && closed.is_err() {
+            return Result.Err(YoutubeError("io", closed.unwrap_err().message()));
+        }
+        return output;
     }
 }

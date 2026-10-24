@@ -4,11 +4,11 @@ import system.net;
 import system.json;
 
 internal class VideoController {
-    internal http: HttpClient;
+    internal http: YoutubeHttp;
     internal origin: string;
     visitor: Option<string>;
 
-    internal constructor(http: HttpClient, origin: string) {
+    internal constructor(http: YoutubeHttp, origin: string) {
         this.http = http;
         this.origin = origin;
         this.visitor = Option.None;
@@ -28,8 +28,7 @@ internal class VideoController {
         url.query.set("bpctr", "9999999999");
         let attempt = 0;
         while attempt < 6 {
-            let text = YoutubeHttp.text(lifetime[0].http, HttpRequest(HttpMethod.Get, url), token)
-                .await;
+            let text = lifetime[0].http.text(HttpRequest(HttpMethod.Get, url), token).await;
             if text.is_err() {
                 return Result.Err(text.unwrap_err());
             }
@@ -57,7 +56,7 @@ internal class VideoController {
             "User-Agent",
             "com.google.android.youtube/20.10.38 (Linux; U; ANDROID 11) gzip"
         );
-        let result = YoutubeHttp.text(lifetime[0].http, request, token).await;
+        let result = lifetime[0].http.text(request, token).await;
         if result.is_err() {
             return Result.Err(result.unwrap_err());
         }
@@ -141,7 +140,7 @@ internal class VideoController {
         request.headers.set("User-Agent", user_agent);
         request.headers.set("Content-Type", "application/json");
         request.set_text(Json.serialize(body));
-        let result = YoutubeHttp.text(lifetime[0].http, request, token).await;
+        let result = lifetime[0].http.text(request, token).await;
         if result.is_err() {
             return Result.Err(result.unwrap_err());
         }
@@ -150,6 +149,12 @@ internal class VideoController {
             return Result.Err(YoutubeError("extraction", "invalid player response JSON"));
         }
         let response = parsed.unwrap();
+        let preview = YoutubePurchase.preview(response);
+        if preview.is_some() {
+            return Result.Err(
+                YoutubeError("purchase_required", "video requires purchase", preview)
+            );
+        }
         let status = YoutubeJson.path(response, ["playabilityStatus", "status"])
             .as_string()
             .unwrap_or("")

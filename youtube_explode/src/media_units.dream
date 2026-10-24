@@ -1,0 +1,29 @@
+module youtube_explode;
+import system;
+
+internal static class MediaUnits {
+    internal static fun format(count: long, symbols: string[]): string {
+        let value = (double)count;
+        let scale = 0;
+        while (value <= -1024.0d || value >= 1024.0d) && scale < 3 {
+            value = value / 1024.0d;
+            scale = scale + 1;
+        }
+        let negative = value < 0.0d;
+        let magnitude = negative ? -value : value;
+        let scaled = (long)Math.round(magnitude * 100.0d);
+        let text = (scaled / 100L).to_string();
+        let fraction = scaled % 100L;
+        if fraction > 0L {
+            let digits = fraction.to_string();
+            if digits.length < 2 {
+                digits = "0" + digits;
+            }
+            if digits.ends_with("0") {
+                digits = digits.substring(0, digits.length - 1);
+            }
+            text = text + "." + digits;
+        }
+        return (negative ? "-" : "") + text + " " + symbols[scale];
+    }
+}

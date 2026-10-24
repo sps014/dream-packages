@@ -1,0 +1,22 @@
+module youtube_explode;
+import system;
+
+/// One source-ordered page of results. Arrays are snapshots; empty pages are valid.
+public class YoutubeBatch<T> {
+    values: T[];
+
+    /// Copies items into a batch independent of subsequent array mutations.
+    public constructor(items: T[]) {
+        this.values = items.slice(0, items.length);
+    }
+
+    /// Source-ordered results; each access returns a copied array.
+    public get items(): T[] {
+        return this.values.slice(0, this.values.length);
+    }
+
+    /// Number of results in this page.
+    public get count(): int {
+        return this.values.length;
+    }
+}

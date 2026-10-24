@@ -1,8 +1,137 @@
 module youtube_explode;
 import system;
 import system.net;
+import sha1;
 
-internal static class YoutubeHttp {
+internal class YoutubeHttp {
+    http: HttpClient;
+    cookies: Option<CookieJar>;
+    consent_seeded: bool;
+
+    internal constructor(http: HttpClient, cookies: Option<CookieJar> = Option.None) {
+        this.http = http;
+        this.cookies = cookies;
+        if this.cookies.is_none() && HttpCapabilities.cookie_jars {
+            this.cookies = Option.Some(CookieJar());
+        }
+        this.consent_seeded = false;
+    }
+
+    static fun cookie(header: string, name: string): Option<string> {
+        for (let pair in header.split(';')) {
+            let text = pair.trim();
+            let equals = text.index_of('=');
+            if equals.is_some() && text.substring(0, equals.unwrap()) == name {
+                return Option.Some(text.substring(equals.unwrap() + 1, text.length));
+            }
+        }
+        return Option.None;
+    }
+
+    fun prepare(request: HttpRequest): Result<Unit, HttpError> {
+        let url = request.url;
+        if url.query.get("hl").is_none() {
+            url.query.set("hl", "en");
+        }
+        if url.path.starts_with("/youtubei/") && url.query.get("key").is_none() {
+            url.query.set("key", "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w");
+        }
+        let origin = url.scheme + "://" + url.host;
+        if request.headers.get("Origin").is_none() {
+            request.headers.set("Origin", origin);
+        }
+        if request.headers.get("User-Agent").is_none() {
+            request.headers.set(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36"
+            );
+        }
+        let consent = "SOCS=CAISEwgDEgk4MTM4MzYzNTIaAmVuIAEaBgiApPzGBg";
+        if this.cookies.is_some() {
+            let jar = this.cookies.unwrap();
+            if !this.consent_seeded {
+                let youtube = Url.parse("https://www.youtube.com").unwrap();
+                let header = jar.header(youtube)?;
+                if YoutubeHttp.cookie(header, "SOCS").is_none() {
+                    jar.store(youtube, consent + "; Domain=youtube.com; Path=/")?;
+                }
+                this.consent_seeded = true;
+            }
+            let header = jar.header(url)?;
+            if !header.is_empty() && request.headers.get("Cookie").is_none() {
+                request.headers.set("Cookie", header);
+            }
+            let session = YoutubeHttp.cookie(header, "__Secure-3PAPISID");
+            if session.is_none() {
+                session = YoutubeHttp.cookie(header, "SAPISID");
+            }
+            if session.is_some()
+                && !session.unwrap()
+                .trim()
+                .is_empty() && request.headers.get("Authorization")
+                .is_none() {
+                let timestamp = DateTime.utc_now().epoch_seconds.to_string();
+                let hash = Encoding.hex_encode(
+                    Sha1.hash(
+                        Encoding.utf8_encode(timestamp + " " + session.unwrap() + " " + origin)
+                    )
+                ).to_upper();
+                request.headers.set("Authorization", "SAPISIDHASH " + timestamp + "_" + hash);
+            }
+        } else if (url.host == "youtube.com" || url.host.ends_with(".youtube.com"))
+            && request.headers.get("Cookie")
+            .is_none() {
+            request.headers.set("Cookie", consent);
+        }
+        return Result.Ok(Unit());
+    }
+
+    internal async fun send(
+        request: HttpRequest,
+        token: Option<CancellationToken>
+    ): Result<HttpResponse, HttpError> {
+        let lifetime = [this];
+        let effective = CancellationToken.resolve(token);
+        let attempt = 0;
+        while true {
+            if CancellationToken.is_cancelled_opt(effective) {
+                return Result.Err(HttpError("ECANCELLED", "YouTube request cancelled"));
+            }
+            lifetime[0].prepare(request)?;
+            let sent = lifetime[0].http.send(request, effective).await;
+            if sent.is_err() {
+                return Result.Err(sent.unwrap_err());
+            }
+            let response = sent.unwrap();
+            if lifetime[0].cookies.is_some() {
+                for (let cookie in response.headers.get_all("Set-Cookie")) {
+                    let stored = lifetime[0].cookies.unwrap().store(response.url, cookie);
+                    if stored.is_err() && stored.unwrap_err().code() != "EINVAL" {
+                        response.close();
+                        return Result.Err(stored.unwrap_err());
+                    }
+                }
+            }
+            if response.status == 429 {
+                response.close();
+                return Result.Err(HttpError("ERATELIMIT", "YouTube request rate limit exceeded"));
+            }
+            if response.status >= 500 && attempt < 5 {
+                response.close();
+                attempt = attempt + 1;
+                continue;
+            }
+            return Result.Ok(response);
+        }
+    }
+
+    internal static fun category(code: string): string {
+        if code == "ECANCELLED" {
+            return "cancelled";
+        }
+        return code == "ERATELIMIT" ? "rate_limited" : "http";
+    }
+
     internal static fun endpoint(origin: string, path: string): Result<Url, YoutubeError> {
         let base = Url.parse(origin);
         if base.is_err() || !(base.unwrap().scheme == "http" || base.unwrap().scheme == "https") {
@@ -17,18 +146,16 @@ internal static class YoutubeHttp {
         return Result.Ok(resolved.unwrap());
     }
 
-    internal static async fun text(
-        http: HttpClient,
+    internal async fun text(
         request: HttpRequest,
         token: Option<CancellationToken>
     ): Result<string, YoutubeError> {
+        let lifetime = [this];
         let effective = CancellationToken.resolve(token);
-        let sent = http.send(request, effective).await;
+        let sent = lifetime[0].send(request, effective).await;
         if sent.is_err() {
             let error = sent.unwrap_err();
-            return Result.Err(
-                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
-            );
+            return Result.Err(YoutubeError(YoutubeHttp.category(error.code()), error.message()));
         }
         let response = sent.unwrap();
         if response.status < 200 || response.status >= 300 {
@@ -45,9 +172,7 @@ internal static class YoutubeHttp {
         response.close();
         if body.is_err() {
             let error = body.unwrap_err();
-            return Result.Err(
-                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
-            );
+            return Result.Err(YoutubeError(YoutubeHttp.category(error.code()), error.message()));
         }
         if effective.is_some() && effective.unwrap().is_cancelled {
             return Result.Err(YoutubeError("cancelled", "YouTube request cancelled"));

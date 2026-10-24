@@ -6,7 +6,7 @@ import system.net;
 /// Seekable HTTP input with bounded range requests and retries from the last delivered byte.
 /// Close explicitly after use. The shared HttpClient remains owned by its caller.
 public class MediaStream: AsyncReader {
-    http: HttpClient;
+    http: YoutubeHttp;
     url: string;
     length_value: long;
     position: long;
@@ -16,10 +16,10 @@ public class MediaStream: AsyncReader {
     closed: bool;
     busy: bool;
 
-    internal constructor(http: HttpClient, info: StreamInfo) {
+    internal constructor(http: YoutubeHttp, info: StreamInfo) {
         this.http = http;
         this.url = info.url;
-        this.length_value = info.content_length.unwrap();
+        this.length_value = info.size.unwrap().bytes;
         this.position = 0L;
         this.segment_length = Url.parse(this.url)
             .unwrap()
@@ -128,7 +128,9 @@ public class MediaStream: AsyncReader {
             let opened = lifetime[0].initialize(token).await;
             if opened.is_err() {
                 let error = opened.unwrap_err();
-                if error.code() == "ECANCELLED" || error.code() == "ECLOSED" || retries >= 5 {
+                if error.code()
+                    == "ECANCELLED"
+                    || error.code() == "ECLOSED" || error.code() == "ERATELIMIT" || retries >= 5 {
                     return Result.Err(error);
                 }
                 lifetime[0].reset();
@@ -143,7 +145,9 @@ public class MediaStream: AsyncReader {
             if read.is_err() {
                 let error = read.unwrap_err();
                 lifetime[0].reset();
-                if error.code() == "ECANCELLED" || error.code() == "ECLOSED" || retries >= 5 {
+                if error.code()
+                    == "ECANCELLED"
+                    || error.code() == "ECLOSED" || error.code() == "ERATELIMIT" || retries >= 5 {
                     return Result.Err(error);
                 }
                 retries = retries + 1;

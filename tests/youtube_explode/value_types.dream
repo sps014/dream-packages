@@ -1,0 +1,54 @@
+module youtube_explode_tests;
+import system;
+import system.collections;
+import system.testing;
+import youtube_explode;
+
+@test
+fun units_preserve_exact_counts_and_format_binary_scales(): void {
+    Assert.eq(FileSize(1536L).kilobytes, 1.5d);
+    Assert.eq(FileSize(1536L).to_string(), "1.5 KB");
+    Assert.eq(FileSize(-1048576L).to_string(), "-1 MB");
+    Assert.eq(FileSize(0L).to_string(), "0 B");
+    Assert.eq(FileSize(-9223372036854775807L - 1L).to_string(), "-8589934592 GB");
+    Assert.eq(FileSize(9007199254740993L).compare(FileSize(9007199254740992L)), 1);
+    Assert.is_true(FileSize(42L).equals(FileSize(42L)));
+    Assert.eq(Bitrate(3145728L).megabits_per_second, 3.0d);
+    Assert.eq(Bitrate(1536L).to_string(), "1.5 Kbit/s");
+    Assert.eq(Bitrate(0L).to_string(), "0 Bit/s");
+    Assert.eq(Bitrate(9007199254740993L).compare(Bitrate(9007199254740992L)), 1);
+}
+
+@test
+fun container_language_quality_and_resolution_value_semantics(): void {
+    Assert.is_true(Container("MP4").equals(Container.mp4));
+    Assert.eq(Container("MP4").hash_code(), Container.mp4.hash_code());
+    Assert.is_true(Container.mp3.is_audio_only);
+    Assert.is_true(Container("Opus").is_audio_only);
+    Assert.is_true(!Container.mp4.is_audio_only);
+    Assert.is_true(!Container("future-container").is_audio_only);
+    Assert.eq(Container.webm.name, "webm");
+    Assert.eq(Container.tgpp.name, "3gpp");
+    let languages = Map<Language, int>();
+    languages[Language("en-US", "English")] = 7;
+    Assert.eq(languages[Language("EN-us", "Another name")], 7);
+    Assert.eq(Language("en", "English").to_string(), "en (English)");
+    Assert.eq(VideoQuality(1080, 59).label, "1080p60");
+    Assert.eq(VideoQuality(1080, 59).framerate, 59);
+    let quality = VideoQuality.parse("1080p60 HDR").unwrap();
+    let same = VideoQuality.parse("1080P60 hdr").unwrap();
+    Assert.is_true(quality.equals(same));
+    Assert.eq(quality.hash_code(), same.hash_code());
+    Assert.eq(quality.compare(same), 0);
+    Assert.is_true(quality.compare(VideoQuality.parse("1080p30").unwrap()) > 0);
+    Assert.eq(quality.to_string(), "1080p60 HDR");
+    Assert.eq(Resolution(3840, 2160).area, 8294400L);
+    Assert.eq(Resolution(1920, 1080).to_string(), "1920x1080");
+    Assert.is_true(Resolution(1920, 1080).equals(Resolution(1920, 1080)));
+    Assert.is_true(!Resolution(1080, 1920).equals(Resolution(1920, 1080)));
+    Assert.eq(
+        Thumbnail("https://example.test", Resolution(120, 90)).to_string(),
+        "Thumbnail (120x90)"
+    );
+    Assert.eq(Engagement(1L, 3L, 1L).to_string(), "Rating: 4.0");
+}

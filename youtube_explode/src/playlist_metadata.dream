@@ -1,0 +1,164 @@
+module youtube_explode;
+import system;
+import system.json;
+import system.collections;
+
+internal static class PlaylistMetadata {
+    internal static fun next_root(response: JsonValue): JsonValue {
+        return YoutubeJson.path(
+            response,
+            ["contents", "twoColumnWatchNextResults", "playlist", "playlist"]
+        );
+    }
+
+    internal static fun count(value: JsonValue): Option<int> {
+        let first = YoutubeJson.path(value, ["runs"]).at(0).unwrap_or(JsonValue.null());
+        let text = YoutubeJson.path(first, ["text"])
+            .as_string()
+            .unwrap_or(
+                YoutubeJson.path(value, ["text"])
+                    .as_string()
+                    .unwrap_or(YoutubeJson.text(value).split(' ')[0])
+            );
+        let number = int.parse(text);
+        return number.is_ok() && number.unwrap() >= 0 ? Option.Some(number.unwrap()) : Option.None;
+    }
+
+    internal static fun form(root: JsonValue, key: string): string {
+        return YoutubeJson.path(
+            root,
+            [key, "inlineFormRenderer", "formField", "textInputFormFieldRenderer", "value"]
+        ).as_string().unwrap_or("");
+    }
+
+    internal static fun browse(
+        id: PlaylistId,
+        response: JsonValue
+    ): Result<Playlist, YoutubeError> {
+        let sidebar = YoutubeJson.path(response, ["sidebar", "playlistSidebarRenderer", "items"]);
+        if !sidebar.is_array() {
+            return Result.Err(YoutubeError("unavailable", "playlist is not available"));
+        }
+        let primary = YoutubeJson.path(
+            sidebar.at(0).unwrap_or(JsonValue.null()),
+            ["playlistSidebarPrimaryInfoRenderer"]
+        );
+        let secondary = YoutubeJson.path(
+            sidebar.at(1).unwrap_or(JsonValue.null()),
+            ["playlistSidebarSecondaryInfoRenderer", "videoOwner", "videoOwnerRenderer"]
+        );
+        let title = YoutubeJson.text(YoutubeJson.path(primary, ["title"]));
+        if title.is_empty() {
+            title = PlaylistMetadata.form(primary, "titleForm");
+        }
+        if title.is_empty() {
+            return Result.Err(YoutubeError("extraction", "playlist title is missing"));
+        }
+        let description = YoutubeJson.text(YoutubeJson.path(primary, ["description"]));
+        if description.is_empty() {
+            description = PlaylistMetadata.form(primary, "descriptionForm");
+        }
+        let author: Option<Author> = Option.None;
+        let channel = YoutubeJson.path(
+            secondary,
+            ["navigationEndpoint", "browseEndpoint", "browseId"]
+        ).as_string();
+        let owner = YoutubeJson.text(YoutubeJson.path(secondary, ["title"]));
+        if channel.is_some() && !owner.is_empty() {
+            let parsed = ChannelId.parse(channel.unwrap());
+            if parsed.is_err() {
+                return Result.Err(YoutubeError("extraction", "invalid playlist owner channel"));
+            }
+            author = Option.Some(Author(parsed.unwrap(), owner));
+        }
+        let stats = YoutubeJson.path(primary, ["stats"]).at(0).unwrap_or(JsonValue.null());
+        let count = PlaylistMetadata.count(stats);
+        let images = YoutubeJson.path(
+            primary,
+            ["thumbnailRenderer", "playlistVideoThumbnailRenderer", "thumbnail", "thumbnails"]
+        );
+        if !images.is_array() {
+            images = YoutubeJson.path(
+                primary,
+                ["thumbnailRenderer", "playlistCustomThumbnailRenderer", "thumbnail", "thumbnails"]
+            );
+        }
+        let thumbnails = List<Thumbnail>();
+        let loaded = YoutubeRenderers.thumbnails(images, thumbnails);
+        if loaded.is_err() {
+            return Result.Err(loaded.unwrap_err());
+        }
+        return Result.Ok(Playlist(id, title, author, description, count, thumbnails.take_array()));
+    }
+
+    internal static fun next(id: PlaylistId, response: JsonValue): Result<Playlist, YoutubeError> {
+        let root = PlaylistMetadata.next_root(response);
+        if !root.is_object() {
+            return Result.Err(YoutubeError("unavailable", "playlist is not available"));
+        }
+        let title = YoutubeJson.path(root, ["title"]).as_string();
+        if title.is_none() {
+            return Result.Err(YoutubeError("extraction", "playlist title is missing"));
+        }
+        let count = PlaylistMetadata.count(YoutubeJson.path(root, ["totalVideosText"]));
+        if count.is_none() {
+            let runs = YoutubeJson.path(root, ["videoCountText", "runs"]);
+            count = PlaylistMetadata.count(runs.at(2).unwrap_or(JsonValue.null()));
+        }
+        let thumbnails = List<Thumbnail>();
+        let videos = YoutubeRenderers.descendants(
+            YoutubeJson.path(root, ["contents"]),
+            "playlistPanelVideoRenderer"
+        );
+        if videos.length > 0 {
+            let loaded = YoutubeRenderers.thumbnails(
+                YoutubeJson.path(videos[0], ["thumbnail", "thumbnails"]),
+                thumbnails
+            );
+            if loaded.is_err() {
+                return Result.Err(loaded.unwrap_err());
+            }
+        }
+        return Result.Ok(
+            Playlist(id, title.unwrap(), Option.None, "", count, thumbnails.take_array())
+        );
+    }
+
+    internal static fun video(
+        id: PlaylistId,
+        value: JsonValue
+    ): Result<PlaylistVideo, YoutubeError> {
+        let video_id = VideoId.parse(
+            YoutubeJson.path(value, ["videoId"]).as_string().unwrap_or("")
+        );
+        let details = YoutubeRenderers.byline(value);
+        let channel_id = ChannelId.parse(YoutubeRenderers.channel_id(details));
+        let author = YoutubeJson.path(details, ["text"]).as_string();
+        if video_id.is_err() || channel_id.is_err() || author.is_none() {
+            return Result.Err(
+                YoutubeError("extraction", "playlist video ID or author is missing or invalid")
+            );
+        }
+        let thumbnails = List<Thumbnail>();
+        let loaded = YoutubeRenderers.thumbnails(
+            YoutubeJson.path(value, ["thumbnail", "thumbnails"]),
+            thumbnails
+        );
+        if loaded.is_err() {
+            return Result.Err(loaded.unwrap_err());
+        }
+        for (let image in Thumbnail.defaults(video_id.unwrap())) {
+            thumbnails.push(image);
+        }
+        return Result.Ok(
+            PlaylistVideo(
+                id,
+                video_id.unwrap(),
+                YoutubeJson.text(YoutubeJson.path(value, ["title"])),
+                Author(channel_id.unwrap(), author.unwrap()),
+                YoutubeRenderers.duration(value),
+                thumbnails.take_array()
+            )
+        );
+    }
+}

@@ -26,4 +26,9 @@ public class Author {
     public get channel_url(): string {
         return "https://www.youtube.com/channel/" + this.channel_id_value.value;
     }
+
+    /// Displays this value in the upstream human-readable form.
+    public override fun to_string(): string {
+        return this.channel_title_value;
+    }
 }

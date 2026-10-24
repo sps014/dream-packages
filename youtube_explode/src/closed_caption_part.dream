@@ -3,15 +3,28 @@ import system;
 
 /// One word or segment in a caption, with timing relative to the caption start.
 public class ClosedCaptionPart {
+    text_value: string;
+
     /// Segment text, preserving whitespace and XML-decoded characters.
-    public text: string;
+    public get text(): string {
+        return this.text_value;
+    }
+
+    offset_ms_value: double;
 
     /// Offset from the caption start in milliseconds, including fractional milliseconds.
-    public offset_ms: double;
+    public get offset_ms(): double {
+        return this.offset_ms_value;
+    }
 
     /// Creates a caption segment with a relative millisecond offset.
     public constructor(text: string, offset_ms: double) {
-        this.text = text;
-        this.offset_ms = offset_ms;
+        this.text_value = text;
+        this.offset_ms_value = offset_ms;
+    }
+
+    /// Displays this value in the upstream human-readable form.
+    public override fun to_string(): string {
+        return this.text_value;
     }
 }

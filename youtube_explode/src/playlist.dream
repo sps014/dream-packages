@@ -1,0 +1,86 @@
+module youtube_explode;
+import system;
+import system.json;
+
+/// Playlist metadata; system playlists may omit the owner, description, and count.
+public class Playlist {
+    id_value: PlaylistId;
+    title_value: string;
+    author_value: Option<Author>;
+    description_value: string;
+    count_value: Option<int>;
+    thumbnails_value: Thumbnail[];
+
+    /// Creates an immutable metadata value, copying supplied arrays.
+    public constructor(
+        id: PlaylistId,
+        title: string,
+        author: Option<Author>,
+        description: string,
+        count: Option<int>,
+        thumbnails: Thumbnail[]
+    ) {
+        this.id_value = id;
+        this.title_value = title;
+        this.author_value = author;
+        this.description_value = description;
+        this.count_value = count;
+        this.thumbnails_value = thumbnails.slice(0, thumbnails.length);
+    }
+
+    /// Canonical playlist identifier.
+    public get id(): PlaylistId {
+        return this.id_value;
+    }
+
+    /// Playlist display title.
+    public get title(): string {
+        return this.title_value;
+    }
+
+    /// Playlist owner, or None for ownerless system playlists.
+    public get author(): Option<Author> {
+        return this.author_value;
+    }
+
+    /// Description, or empty when absent.
+    public get description(): string {
+        return this.description_value;
+    }
+
+    /// Reported video count, or None when unavailable.
+    public get count(): Option<int> {
+        return this.count_value;
+    }
+
+    /// Playlist artwork; the array is a snapshot.
+    public get thumbnails(): Thumbnail[] {
+        return this.thumbnails_value.slice(0, this.thumbnails_value.length);
+    }
+
+    /// Canonical YouTube URL.
+    public get url(): string {
+        return "https://www.youtube.com/playlist?list=" + this.id_value.value;
+    }
+
+    /// Decodes browse metadata without network access; unavailable sidebars return unavailable.
+    public static fun from_browse_response(
+        id: PlaylistId,
+        response: JsonValue
+    ): Result<Playlist, YoutubeError> {
+        return PlaylistMetadata.browse(id, response);
+    }
+
+    /// Decodes limited next-endpoint metadata, including system playlists with no owner.
+    public static fun from_next_response(
+        id: PlaylistId,
+        response: JsonValue
+    ): Result<Playlist, YoutubeError> {
+        return PlaylistMetadata.next(id, response);
+    }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Playlist (" + this.title_value + ")";
+    }
+}

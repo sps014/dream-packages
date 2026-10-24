@@ -54,12 +54,12 @@ fun streams_formats_selection_languages_and_sizes(): void {
     let audio = manifest.filter(StreamKind.AudioOnly)[0];
     Assert.eq(audio.audio_language.unwrap().code, "en");
     Assert.is_true(audio.is_audio_language_default.unwrap());
-    Assert.eq(audio.content_length.unwrap(), 12345L);
+    Assert.eq(audio.size.unwrap().bytes, 12345L);
     Assert.eq(audio.audio_codec.unwrap(), "mp4a.40.2");
     Assert.is_true(audio.video_quality.is_none());
     let video = manifest.highest_video_quality().unwrap();
     Assert.eq(video.video_codec.unwrap(), "av01.0.05M.08");
-    Assert.eq(video.content_length.unwrap(), 9007199254740993L);
+    Assert.eq(video.size.unwrap().bytes, 9007199254740993L);
     Assert.is_true(video.is_video_upscaled);
     Assert.eq(video.video_quality.unwrap().label, "1080p60 HDR");
     Assert.eq(video.video_quality.unwrap().framerate, 60);
@@ -70,7 +70,7 @@ fun streams_formats_selection_languages_and_sizes(): void {
     let muxed = manifest.filter(StreamKind.Muxed)[0];
     Assert.eq(muxed.video_quality.unwrap().label, "360p");
     Assert.eq(muxed.video_resolution.unwrap().width, 640);
-    Assert.is_true(muxed.content_length.is_none());
+    Assert.is_true(muxed.size.is_none());
     Assert.eq(Json.serialize(json), original);
     let snapshot = manifest.streams;
     snapshot[0] = audio;
@@ -128,9 +128,9 @@ fun dash_namespaces_and_filters(): void {
     let manifest = StreamManifest.from_dash(xml).unwrap();
     Assert.eq(manifest.streams.length, 2);
     Assert.eq(manifest.streams[0].kind, StreamKind.AudioOnly);
-    Assert.eq(manifest.streams[0].content_length.unwrap(), 123L);
+    Assert.eq(manifest.streams[0].size.unwrap().bytes, 123L);
     Assert.eq(manifest.streams[1].kind, StreamKind.VideoOnly);
-    Assert.eq(manifest.streams[1].content_length.unwrap(), 999L);
+    Assert.eq(manifest.streams[1].size.unwrap().bytes, 999L);
     Assert.eq(manifest.streams[1].video_quality.unwrap().label, "1080p60");
     Assert.eq(manifest.streams[1].video_resolution.unwrap().width, 1920);
     Assert.is_true(StreamManifest.from_dash("<broken>").is_err());

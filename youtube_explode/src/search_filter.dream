@@ -1,0 +1,13 @@
+module youtube_explode;
+
+/// Restricts the types requested from YouTube search.
+public enum SearchFilter {
+    /// Videos, playlists, and channels.
+    All,
+    /// Videos only.
+    Video,
+    /// Playlists only.
+    Playlist,
+    /// Channels only.
+    Channel,
+}

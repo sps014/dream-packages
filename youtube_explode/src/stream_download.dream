@@ -15,10 +15,7 @@ internal static class StreamDownload {
             if read.is_err() {
                 let error = read.unwrap_err();
                 return Result.Err(
-                    YoutubeError(
-                        error.code() == "ECANCELLED" ? "cancelled" : "http",
-                        error.message()
-                    )
+                    YoutubeError(YoutubeHttp.category(error.code()), error.message())
                 );
             }
             let bytes = read.unwrap();

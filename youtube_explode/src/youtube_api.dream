@@ -1,0 +1,45 @@
+module youtube_explode;
+import system;
+import system.net;
+import system.json;
+
+internal static class YoutubeApi {
+    internal static fun context(visitor: Option<string> = Option.None): JsonValue {
+        let client = JsonValue.dict();
+        client["clientName"] = JsonValue.from_string("WEB");
+        client["clientVersion"] = JsonValue.from_string("2.20210408.08.00");
+        client["hl"] = JsonValue.from_string("en");
+        client["gl"] = JsonValue.from_string("US");
+        client["utcOffsetMinutes"] = JsonValue.from_int(0);
+        client["visitorData"] = visitor.is_some()
+            ? JsonValue.from_string(visitor.unwrap()) : JsonValue.null();
+        let context = JsonValue.dict();
+        context["client"] = client;
+        return context;
+    }
+
+    internal static async fun post(
+        http: YoutubeHttp,
+        origin: string,
+        method: string,
+        body: JsonValue,
+        token: Option<CancellationToken>
+    ): Result<JsonValue, YoutubeError> {
+        let endpoint = YoutubeHttp.endpoint(origin, "/youtubei/v1/" + method);
+        if endpoint.is_err() {
+            return Result.Err(endpoint.unwrap_err());
+        }
+        let request = HttpRequest(HttpMethod.Post, endpoint.unwrap());
+        request.headers.set("Content-Type", "application/json");
+        request.set_text(Json.serialize(body));
+        let text = http.text(request, token).await;
+        if text.is_err() {
+            return Result.Err(text.unwrap_err());
+        }
+        let parsed = Json.deserialize<JsonValue>(text.unwrap());
+        if parsed.is_err() {
+            return Result.Err(YoutubeError("extraction", "invalid YouTube API JSON"));
+        }
+        return Result.Ok(parsed.unwrap());
+    }
+}

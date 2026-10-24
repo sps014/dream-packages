@@ -8,13 +8,19 @@ import system.io;
 
 /// Resolves playable stream metadata, including signatures, DASH, and HTTP size verification.
 public class StreamClient {
-    http: HttpClient;
+    http: YoutubeHttp;
     controller: VideoController;
     cipher_value: Option<SignatureCipher>;
 
-    /// Shares an HTTP client, its cookies and connection pools. origin can select an HTTP fixture/mirror.
-    public constructor(http: HttpClient, origin: string = "https://www.youtube.com") {
-        this.http = http;
+    /// Shares the caller's HTTP connection pools; origin selects YouTube or a fixture/mirror.
+    /// cookies supplies a native CookieJar for YouTube's consent and authenticated requests.
+    /// Without a jar, native clients create one; Node supports stateless requests without a jar.
+    public constructor(
+        http: HttpClient,
+        origin: string = "https://www.youtube.com",
+        cookies: Option<CookieJar> = Option.None
+    ) {
+        this.http = YoutubeHttp(http, cookies);
         this.controller = VideoController(this.http, origin);
         this.cipher_value = Option.None;
     }
@@ -28,11 +34,9 @@ public class StreamClient {
         if endpoint.is_err() {
             return Result.Err(endpoint.unwrap_err());
         }
-        let iframe = YoutubeHttp.text(
-            lifetime[0].http,
-            HttpRequest(HttpMethod.Get, endpoint.unwrap()),
-            token
-        ).await;
+        let iframe = lifetime[0]
+            .http.text(HttpRequest(HttpMethod.Get, endpoint.unwrap()), token)
+            .await;
         if iframe.is_err() {
             return Result.Err(iframe.unwrap_err());
         }
@@ -49,11 +53,9 @@ public class StreamClient {
         if player_url.is_err() {
             return Result.Err(player_url.unwrap_err());
         }
-        let text = YoutubeHttp.text(
-            lifetime[0].http,
-            HttpRequest(HttpMethod.Get, player_url.unwrap()),
-            token
-        ).await;
+        let text = lifetime[0]
+            .http.text(HttpRequest(HttpMethod.Get, player_url.unwrap()), token)
+            .await;
         if text.is_err() {
             return Result.Err(text.unwrap_err());
         }
@@ -92,7 +94,10 @@ public class StreamClient {
         token: Option<CancellationToken>
     ): Result<StreamProbe, YoutubeError> {
         let lifetime = [this];
-        let length = stream.content_length;
+        let length: Option<long> = Option.None;
+        if stream.size.is_some() {
+            length = Option.Some(stream.size.unwrap().bytes);
+        }
         if length.is_none() {
             let target = Url.parse(stream.url);
             if target.is_err() {
@@ -104,10 +109,7 @@ public class StreamClient {
             if sent.is_err() {
                 let error = sent.unwrap_err();
                 return Result.Err(
-                    YoutubeError(
-                        error.code() == "ECANCELLED" ? "cancelled" : "http",
-                        error.message()
-                    )
+                    YoutubeError(YoutubeHttp.category(error.code()), error.message())
                 );
             }
             let response = sent.unwrap();
@@ -144,10 +146,7 @@ public class StreamClient {
             if sent.is_err() {
                 let error = sent.unwrap_err();
                 return Result.Err(
-                    YoutubeError(
-                        error.code() == "ECANCELLED" ? "cancelled" : "http",
-                        error.message()
-                    )
+                    YoutubeError(YoutubeHttp.category(error.code()), error.message())
                 );
             }
             let response = sent.unwrap();
@@ -195,15 +194,8 @@ public class StreamClient {
             if url.is_err() {
                 return Result.Err(YoutubeError("extraction", "invalid DASH manifest URL"));
             }
-            let body = YoutubeHttp.text(
-                lifetime[0].http,
-                HttpRequest(HttpMethod.Get, url.unwrap()),
-                token
-            ).await;
-            if body.is_err()
-                && body.unwrap_err()
-                .code() != "http" && body.unwrap_err()
-                .code() != "rate_limited" {
+            let body = lifetime[0].http.text(HttpRequest(HttpMethod.Get, url.unwrap()), token).await;
+            if body.is_err() && body.unwrap_err().code() != "http" {
                 return Result.Err(body.unwrap_err());
             }
             if body.is_ok() {
@@ -315,7 +307,8 @@ public class StreamClient {
         let url = Url.parse(info.url);
         if url.is_err()
             || (url.unwrap().scheme != "http" && url.unwrap().scheme != "https")
-            || info.content_length.is_none() || info.content_length.unwrap() < 0L {
+            || info.size.is_none() || info.size.unwrap()
+            .bytes < 0L {
             return Result.Err(
                 YoutubeError(
                     "invalid_input",
@@ -328,9 +321,7 @@ public class StreamClient {
         if initialized.is_err() {
             stream.close();
             let error = initialized.unwrap_err();
-            return Result.Err(
-                YoutubeError(error.code() == "ECANCELLED" ? "cancelled" : "http", error.message())
-            );
+            return Result.Err(YoutubeError(YoutubeHttp.category(error.code()), error.message()));
         }
         return Result.Ok(stream);
     }

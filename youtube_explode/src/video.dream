@@ -120,4 +120,9 @@ public class Video {
             page.dislikes
         );
     }
+
+    /// Displays the result kind and title.
+    public override fun to_string(): string {
+        return "Video (" + this.title_value + ")";
+    }
 }

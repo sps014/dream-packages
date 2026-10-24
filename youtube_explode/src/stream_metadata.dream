@@ -142,14 +142,18 @@ internal static class StreamMetadata {
         let upscaled = YoutubeProtobuf.upscaled(
             YoutubeJson.path(value, ["xtags"]).as_string().unwrap_or("")
         );
+        let size: Option<FileSize> = Option.None;
+        if length.is_some() {
+            size = Option.Some(FileSize(length.unwrap()));
+        }
         return Result.Ok(
             StreamInfo(
                 itag.unwrap(),
                 target.to_string(),
                 kind,
-                container,
-                length,
-                bitrate.unwrap(),
+                Container(container),
+                size,
+                Bitrate(bitrate.unwrap()),
                 audio,
                 language,
                 YoutubeJson.path(audio_track, ["audioIsDefault"]).as_bool(),

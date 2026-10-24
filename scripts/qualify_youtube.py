@@ -43,6 +43,8 @@ class Handler(BaseHTTPRequestHandler):
                 stream["contentLength"] = "0" if path == "/empty" else "10"
             formats.append(stream)
         response["streamingData"] = {"formats": formats, "hlsManifestUrl": base + "/live.m3u8"}
+        if video_id == "dashrate123":
+            response["streamingData"]["dashManifestUrl"] = base + "/rate"
         return response
 
     @staticmethod
@@ -62,11 +64,13 @@ class Handler(BaseHTTPRequestHandler):
         body = b""
         status = 200
         if target.path == "/captions":
-            if parse_qs(target.query) != {"keep": ["1"], "format": ["3"], "fmt": ["3"]}:
+            if parse_qs(target.query) != {"keep": ["1"], "format": ["3"], "fmt": ["3"], "hl": ["en"]}:
                 status = 400
             body = b"<timedtext><body><p t='1000' d='2000'><s>Hello &amp; world</s></p></body></timedtext>"
         elif target.path == "/bad":
             body = b"<broken>"
+        elif target.path == "/caption_srt":
+            body = "<timedtext><body><p t='1000' d='2000'>Hello Ω --&gt;</p><p t='4000' d='500'>Second</p></body></timedtext>".encode()
         elif target.path == "/rate":
             status = 429
         elif target.path == "/watch":
@@ -97,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = 400
             elif target.path == "/mismatch":
                 status = 404
-            elif target.path == "/signed" and query != {"range": ["8-9"], "keep": ["1"], "signature": ["edabc"]}:
+            elif target.path == "/signed" and query != {"range": ["8-9"], "keep": ["1"], "signature": ["edabc"], "hl": ["en"]}:
                 status = 400
             body = b"89"
         elif target.path in {"/bytes", "/retry", "/truncated", "/large"}:
@@ -144,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = 400
         elif payload.get("contentCheckOk") is not True:
             status = 400
-        if payload["videoId"] in {"streamtest1", "tvfallback1"}:
+        if payload["videoId"] in {"streamtest1", "tvfallback1", "dashrate123"}:
             response = self.stream_player(payload["videoId"], profile)
         elif profile == "VISIONOS":
             response = self.player(payload["videoId"])
@@ -244,12 +248,13 @@ async fun streams_http_sizes_cipher_cache_and_tv_fallback(): void {
     let id = VideoId.parse("streamtest1").unwrap();
     let manifest = client.get_manifest(id).await.unwrap();
     Assert.eq(manifest.streams.length, 3);
-    Assert.eq(manifest.streams[0].content_length.unwrap(), 10L);
-    Assert.eq(manifest.streams[1].content_length.unwrap(), 10L);
-    Assert.eq(manifest.streams[2].content_length.unwrap(), 0L);
+    Assert.eq(manifest.streams[0].size.unwrap().bytes, 10L);
+    Assert.eq(manifest.streams[1].size.unwrap().bytes, 10L);
+    Assert.eq(manifest.streams[2].size.unwrap().bytes, 0L);
     Assert.eq(Url.parse(manifest.streams[1].url).unwrap().query.get("signature").unwrap(), "edabc");
     Assert.eq(client.get_manifest(VideoId.parse("tvfallback1").unwrap()).await.unwrap().streams.length, 3);
     Assert.eq(client.get_hls_url(id).await.unwrap(), BASE + "/live.m3u8");
+    Assert.eq(client.get_manifest(VideoId.parse("dashrate123").unwrap()).await.unwrap_err().code(), "rate_limited");
     let source = CancellationSource();
     source.cancel();
     Assert.eq(client.get_manifest(id, Option.Some(source.token)).await.unwrap_err().code(), "cancelled");
@@ -284,6 +289,7 @@ async fun seekable_downloads_retries_and_progress(): void {
     let http = HttpClient();
     let client = StreamClient(http, BASE);
     let info = download_info("/bytes");
+    Assert.eq(client.get(download_info("/rate")).await.unwrap_err().code(), "rate_limited");
     let input = client.get(info).await.unwrap();
     Assert.eq(input.length, 10L);
     Assert.eq(Encoding.utf8_decode(input.read_async(3).await.unwrap()), "012");
@@ -333,6 +339,38 @@ async fun seekable_downloads_retries_and_progress(): void {
     directory.close().unwrap();
     http.close().unwrap();
 }
+
+@test
+@timeout(15000)
+async fun caption_srt_writers_progress_and_files(): void {
+    let http = HttpClient();
+    let client = ClosedCaptionClient(http);
+    let info = ClosedCaptionTrackInfo(BASE + "/caption_srt", Language("en", "English"), false);
+    let expected = "1\n00:00:01,000 --> 00:00:03,000\nHello Ω ––>\n\n2\n00:00:04,000 --> 00:00:04,500\nSecond\n\n";
+    let output = MemoryStream();
+    let progress = List<double>();
+    let report: fun(double): void = (value: double) => { progress.push(value); };
+    Assert.eq(client.write_to(info, ShortWriter(output), Option.Some(report)).await.unwrap(), (long)Encoding.utf8_encode(expected).length);
+    Assert.eq(Encoding.utf8_decode(output.to_bytes().unwrap()), expected);
+    Assert.eq(progress.length, 2);
+    Assert.eq(progress[0], 0.5d);
+    Assert.eq(progress[1], 1.0d);
+    let directory = TempDirectory.create().unwrap();
+    let path = directory.path + "/captions.srt";
+    client.download(info, path).await.unwrap();
+    Assert.eq(File.read(path).await.unwrap(), expected);
+    let cancelled = CancellationSource();
+    let stop: fun(double): void = (value: double) => { cancelled.cancel(); };
+    let partial = MemoryStream();
+    Assert.eq(client.write_to(info, partial, Option.Some(stop), Option.Some(cancelled.token)).await.unwrap_err().code(), "cancelled");
+    Assert.eq(Encoding.utf8_decode(partial.to_bytes().unwrap()), "1\n00:00:01,000 --> 00:00:03,000\nHello Ω ––>\n\n");
+    Assert.eq(client.download(info, path, Option.None, Option.Some(cancelled.token)).await.unwrap_err().code(), "cancelled");
+    Assert.eq(File.read(path).await.unwrap(), expected);
+    output.close().unwrap();
+    Assert.eq(client.write_to(info, output).await.unwrap_err().code(), "io");
+    directory.close().unwrap();
+    http.close().unwrap();
+}
 '''.replace("BASE", json.dumps(base))
     (work / "http.dream").write_text(code, encoding="utf-8")
     try:
@@ -342,12 +380,12 @@ async fun seekable_downloads_retries_and_progress(): void {
         probes = ["HEAD /media", "/media", "HEAD /gone", "/mismatch", "/signed"]
         stream_requests = ["/sw.js_data", "/youtubei/v1/player", "/iframe_api",
                            "/s/player/abcd1234/player_ias.vflset/en_US/base.js"] + probes + [
-                           "/youtubei/v1/player", "/youtubei/v1/player", "/youtubei/v1/player"] + probes + ["/youtubei/v1/player"]
-        download_requests = ["/bytes"] * 3 + ["/retry"] * 3 + ["/truncated"] * 6 + ["/large"] * 2 + ["/bytes"]
+                           "/youtubei/v1/player", "/youtubei/v1/player", "/youtubei/v1/player"] + probes + ["/youtubei/v1/player", "/youtubei/v1/player", "/rate"]
+        download_requests = ["/rate"] + ["/bytes"] * 3 + ["/retry"] * 3 + ["/truncated"] * 6 + ["/large"] * 2 + ["/bytes"] + ["/caption_srt"] * 4
         if Handler.requests != (["/captions", "/bad", "/rate"] + video_requests + stream_requests + download_requests) * 2:
             raise SystemExit(f"Unexpected requests (including cancelled work): {Handler.requests}")
         if Handler.profiles != (["VISIONOS", "ANDROID", "VISIONOS", "ANDROID"] +
-                                ["VISIONOS", "VISIONOS", "ANDROID", "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "VISIONOS"]) * 2:
+                                ["VISIONOS", "VISIONOS", "ANDROID", "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "VISIONOS", "VISIONOS"]) * 2:
             raise SystemExit(f"Wrong player fallback order: {Handler.profiles}")
     except Exception:
         print(f"Requests at failure: {Handler.requests}; range attempts: {Handler.range_attempts}", flush=True)

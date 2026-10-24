@@ -3,17 +3,33 @@ import system;
 
 /// One caption, including optional word/segment timing.
 public class ClosedCaption {
+    text_value: string;
+
     /// Caption text, including spaces and embedded line breaks.
-    public text: string;
+    public get text(): string {
+        return this.text_value;
+    }
+
+    offset_ms_value: double;
 
     /// Offset from video start, in milliseconds.
-    public offset_ms: double;
+    public get offset_ms(): double {
+        return this.offset_ms_value;
+    }
+
+    duration_ms_value: double;
 
     /// Display duration, in milliseconds.
-    public duration_ms: double;
+    public get duration_ms(): double {
+        return this.duration_ms_value;
+    }
+
+    parts_value: ClosedCaptionPart[];
 
     /// Ordered timed segments; empty when the track does not include them.
-    public parts: ClosedCaptionPart[];
+    public get parts(): ClosedCaptionPart[] {
+        return this.parts_value.slice(0, this.parts_value.length);
+    }
 
     /// Creates a caption with absolute timing and optional relative segment timings.
     public constructor(
@@ -22,20 +38,25 @@ public class ClosedCaption {
         duration_ms: double,
         parts: ClosedCaptionPart[]
     ) {
-        this.text = text;
-        this.offset_ms = offset_ms;
-        this.duration_ms = duration_ms;
-        this.parts = parts.slice(0, parts.length);
+        this.text_value = text;
+        this.offset_ms_value = offset_ms;
+        this.duration_ms_value = duration_ms;
+        this.parts_value = parts.slice(0, parts.length);
     }
 
     /// Returns the first segment whose offset is at or after relative_time_ms, matching upstream.
     /// Returns None when no segment satisfies the comparison.
     public fun get_part_by_time(relative_time_ms: double): Option<ClosedCaptionPart> {
-        for (let part in this.parts) {
+        for (let part in this.parts_value) {
             if part.offset_ms >= relative_time_ms {
                 return Option.Some(part);
             }
         }
         return Option.None;
+    }
+
+    /// Displays this value in the upstream human-readable form.
+    public override fun to_string(): string {
+        return this.text_value;
     }
 }
